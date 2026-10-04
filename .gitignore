@@ -1,0 +1,35 @@
+# dependencies
+/node_modules
+
+# next.js
+/.next/
+/out/
+next-env.d.ts
+
+# production
+/build
+
+# env files
+.env
+.env.local
+.env.*.local
+
+# logs
+/logs
+*.log
+npm-debug.log*
+
+# typescript
+*.tsbuildinfo
+
+# IDE
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# misc
+.vercel
+.claude/scheduled_tasks.lock
