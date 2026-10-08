@@ -428,3 +428,11 @@ INSERT INTO vulnerability_checks (id, name, slug, description, severity, risk_sc
    'Configure secure cookie settings.', true)
 
 ON CONFLICT (slug) DO NOTHING;
+
+-- Community Vulnerability Mapping check
+INSERT INTO vulnerability_checks (id, name, slug, description, severity, risk_score, recommendation, enabled) VALUES
+  ('d0000001-0000-0000-0000-000000000016', 'Community Vulnerability Mapping', 'community-vulnerability-mapping',
+   'Maps detected CCTV device details against the SentriX community-maintained vulnerability database.',
+   'high', 0,
+   'Review matched vulnerability records, update firmware, disable exposed services, and follow vendor security hardening guidance.', true)
+ON CONFLICT (slug) DO NOTHING;

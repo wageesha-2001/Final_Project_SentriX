@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { motion } from 'framer-motion'
 import Link from 'next/link'
@@ -8,12 +8,14 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Scan, Device, Vulnerability } from '@/types'
-import { formatDate, formatDuration } from '@/lib/utils'
-import { Cpu, Shield, AlertTriangle, FileText, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react'
+import { Scan, Device, Vulnerability, EnrichedMatch } from '@/types'
+import { MatchCard, SEVERITY_CLASS } from '@/components/vuln-db/MatchCard'
+import { SEVERITIES } from '@/lib/vuln-db/constants'
+import { formatDate, formatDuration, cn } from '@/lib/utils'
+import { Cpu, Shield, AlertTriangle, FileText, ExternalLink, ChevronDown, ChevronUp, Database, Filter } from 'lucide-react'
 import toast from 'react-hot-toast'
 
-interface DeviceWithVulns extends Device { vulnerabilities: Vulnerability[] }
+interface DeviceWithVulns extends Device { vulnerabilities: Vulnerability[]; community_matches: EnrichedMatch[] }
 
 export default function ScanResultsPage() {
   const { id } = useParams<{ id: string }>()
@@ -22,6 +24,9 @@ export default function ScanResultsPage() {
   const [loading, setLoading] = useState(true)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null)
+  const [severityFilter, setSeverityFilter] = useState('')
+  const [vendorFilter, setVendorFilter] = useState('')
+  const [categoryFilter, setCategoryFilter] = useState('')
 
   useEffect(() => {
     fetch(`/api/scans/${id}/results`)
@@ -29,10 +34,14 @@ export default function ScanResultsPage() {
       .then(data => {
         if (data.data) {
           setScan(data.data.scan)
-          const devMap = new Map(data.data.devices.map((d: Device) => [d.id, { ...d, vulnerabilities: [] }]))
+          const devMap = new Map(data.data.devices.map((d: Device) => [d.id, { ...d, vulnerabilities: [], community_matches: [] }]))
           data.data.vulnerabilities.forEach((v: Vulnerability) => {
             const dev = devMap.get(v.device_id) as DeviceWithVulns | undefined
             if (dev) dev.vulnerabilities.push(v)
+          });
+          (data.data.community_matches ?? []).forEach((m: EnrichedMatch) => {
+            const dev = devMap.get(m.device_id) as DeviceWithVulns | undefined
+            if (dev) dev.community_matches.push(m)
           })
           setDevices(Array.from(devMap.values()) as DeviceWithVulns[])
         }
@@ -49,6 +58,21 @@ export default function ScanResultsPage() {
     } catch { toast.error('Error generating report') }
     finally { setGeneratingReport(false) }
   }
+
+  const allMatches = useMemo(() => devices.flatMap(d => d.community_matches), [devices])
+  const filterActive = !!(severityFilter || vendorFilter || categoryFilter)
+  const matchPasses = (m: EnrichedMatch) =>
+    (!severityFilter || m.vulnerability.severity === severityFilter) &&
+    (!vendorFilter || m.vulnerability.vendor === vendorFilter) &&
+    (!categoryFilter || m.vulnerability.category === categoryFilter)
+  const visibleDevices = useMemo(
+    () => filterActive ? devices.filter(d => d.community_matches.some(matchPasses)) : devices,
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [devices, severityFilter, vendorFilter, categoryFilter, filterActive],
+  )
+  const highestSeverity = SEVERITIES.find(sev => allMatches.some(m => m.vulnerability.severity === sev))
+  const vendorOptions = Array.from(new Set(allMatches.map(m => m.vulnerability.vendor))).sort()
+  const categoryOptions = Array.from(new Set(allMatches.map(m => m.vulnerability.category))).sort()
 
   if (loading) return <DashboardLayout title="Scan Results"><LoadingSpinner size="lg" text="Loading results..." className="h-64" /></DashboardLayout>
   if (!scan) return <DashboardLayout title="Scan Results"><EmptyState icon={Cpu} title="Scan not found" /></DashboardLayout>
@@ -87,14 +111,58 @@ export default function ScanResultsPage() {
               </div>
             ))}
           </div>
+
+          <div className="mt-5 pt-5 border-t border-cyber-border">
+            <p className="text-xs font-semibold text-cyber-text-muted uppercase tracking-wider mb-3 flex items-center gap-2">
+              <Database className="w-3.5 h-3.5 text-cyber-accent" /> Community Vulnerability Matches
+            </p>
+            <div className="grid grid-cols-3 gap-4 text-center">
+              <div>
+                <p className="text-2xl font-black text-cyber-accent">{allMatches.length}</p>
+                <p className="text-xs text-cyber-muted uppercase tracking-wider mt-1">Total Matches</p>
+              </div>
+              <div>
+                {highestSeverity
+                  ? <span className={cn('inline-block text-xs px-2 py-1 rounded border font-bold uppercase tracking-wider', SEVERITY_CLASS[highestSeverity])}>{highestSeverity}</span>
+                  : <p className="text-2xl font-black text-cyber-green">—</p>}
+                <p className="text-xs text-cyber-muted uppercase tracking-wider mt-1">Highest Severity</p>
+              </div>
+              <div>
+                <p className="text-2xl font-black text-cyber-yellow">{devices.filter(d => d.community_matches.length > 0).length}</p>
+                <p className="text-xs text-cyber-muted uppercase tracking-wider mt-1">Devices With Known Vulns</p>
+              </div>
+            </div>
+          </div>
         </motion.div>
 
         <div className="space-y-4">
-          <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider">Discovered Devices ({devices.length})</h3>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider">Discovered Devices ({visibleDevices.length}{filterActive ? ` of ${devices.length}` : ''})</h3>
+            {allMatches.length > 0 && (
+              <div className="flex flex-wrap gap-2">
+                {[
+                  { label: 'All Severities', value: severityFilter, set: setSeverityFilter, options: SEVERITIES.filter(sev => allMatches.some(m => m.vulnerability.severity === sev)) },
+                  { label: 'All Vendors', value: vendorFilter, set: setVendorFilter, options: vendorOptions },
+                  { label: 'All Categories', value: categoryFilter, set: setCategoryFilter, options: categoryOptions },
+                ].map(f => (
+                  <div key={f.label} className="relative">
+                    <Filter className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-cyber-muted" />
+                    <select value={f.value} onChange={e => f.set(e.target.value)} aria-label={f.label}
+                      className="cyber-input pl-9 pr-8 py-2 rounded-lg text-xs appearance-none cursor-pointer max-w-[12rem]">
+                      <option value="">{f.label}</option>
+                      {f.options.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
           {devices.length === 0 ? (
             <EmptyState icon={Cpu} title="No devices discovered" description="The scan did not find any devices on the network." />
+          ) : visibleDevices.length === 0 ? (
+            <EmptyState icon={Cpu} title="No devices match the selected filters" />
           ) : (
-            devices.map((device, i) => (
+            visibleDevices.map((device, i) => (
               <motion.div key={device.id} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
                 className="cyber-card overflow-hidden">
                 <div className="p-4 flex items-center justify-between cursor-pointer hover:bg-white/2"
@@ -109,6 +177,11 @@ export default function ScanResultsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
+                    {device.community_matches.length > 0 && (
+                      <span className="text-[10px] px-2 py-0.5 rounded border border-cyber-accent/30 bg-cyber-accent/10 text-cyber-accent font-semibold">
+                        {device.community_matches.length} known
+                      </span>
+                    )}
                     <RiskBadge level={device.risk_level} showScore={device.risk_score} size="sm" />
                     <Link href={`/devices/${device.id}`} onClick={e => e.stopPropagation()}
                       className="p-1.5 rounded text-cyber-muted hover:text-cyber-accent">
@@ -127,6 +200,14 @@ export default function ScanResultsPage() {
                         <div><span className="text-cyber-muted">Ports:</span> <span className="text-white ml-1">{device.open_ports.map(p => p.port).join(', ')}</span></div>
                         <div><span className="text-cyber-muted">Protocols:</span> <span className="text-white ml-1">{device.protocols.join(', ')}</span></div>
                       </div>
+                      {device.community_matches.length > 0 && (
+                        <div>
+                          <p className="text-xs font-semibold text-cyber-text-muted uppercase tracking-wider mb-2">Community Vulnerability Matches</p>
+                          <div className="space-y-2">
+                            {device.community_matches.filter(matchPasses).map(m => <MatchCard key={m.id} match={m} compact />)}
+                          </div>
+                        </div>
+                      )}
                       {device.vulnerabilities.length > 0 && (
                         <div>
                           <p className="text-xs font-semibold text-cyber-text-muted uppercase tracking-wider mb-2">Vulnerabilities</p>

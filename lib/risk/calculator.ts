@@ -121,6 +121,24 @@ export function calculateRiskScore(vulnerabilities: Pick<Vulnerability, 'score'>
   return Math.min(total, 100)
 }
 
+/**
+ * Device risk including community vulnerability matches. `risk_score_added`
+ * is already scaled by match confidence (High 100%, Medium 75%, Low 50%).
+ */
+export function calculateRiskScoreWithMatches(
+  vulnerabilities: Pick<Vulnerability, 'score'>[],
+  matches: { risk_score_added: number }[],
+): number {
+  const total =
+    vulnerabilities.reduce((sum, v) => sum + v.score, 0) +
+    matches.reduce((sum, m) => sum + m.risk_score_added, 0)
+  return Math.min(total, 100)
+}
+
+export function calculateTrustScore(riskScore: number): number {
+  return 100 - Math.min(Math.max(riskScore, 0), 100)
+}
+
 export function getRiskLevel(score: number): RiskLevel {
   if (score === 0) return 'secure'
   if (score <= 20) return 'low'

@@ -1,6 +1,9 @@
 import { createServerSupabase } from '@/lib/supabase/server'
-import { calculateRiskScore, getRiskLevel, VULNERABILITY_DEFINITIONS, getOverallScanRisk } from '@/lib/risk/calculator'
-import { Device, Vulnerability, RiskLevel } from '@/types'
+import { calculateRiskScoreWithMatches, getRiskLevel, VULNERABILITY_DEFINITIONS, getOverallScanRisk } from '@/lib/risk/calculator'
+import { matchDevice, MatchResult } from '@/lib/vuln-db/matcher'
+import { isCommunityMappingEnabled, snapshotOf } from '@/lib/vuln-db/queries'
+import { getCommunityRecords } from '@/lib/vuln-db/store'
+import { Device, Vulnerability, RiskLevel, CommunityVulnerability } from '@/types'
 
 interface MockDeviceTemplate {
   vendor: string
@@ -117,6 +120,28 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
   // Fetch globally enabled checks from the database
   const enabledSlugs = await getEnabledCheckSlugs(supabase)
 
+  // Community Vulnerability Mapping (defensive lookup against stored records only)
+  const { data: scanRow } = await supabase.from('scans').select('user_id').eq('id', scanId).single()
+  const userId: string | null = scanRow?.user_id ?? null
+  let communityRecords: CommunityVulnerability[] = []
+  let communityEnabled = false
+  try {
+    communityEnabled = await isCommunityMappingEnabled(supabase)
+    if (communityEnabled) {
+      communityRecords = await getCommunityRecords(supabase, userId, { fetchRemoteIfMissing: true })
+      await supabase.from('audit_logs').insert({
+        user_id: userId, action: 'community_vuln_matching_started',
+        details: { scan_id: scanId, records_available: communityRecords.length },
+      })
+    }
+  } catch (e) {
+    console.error('[SentriX] community vulnerability loading failed', e)
+    communityEnabled = false
+  }
+  const recordById = new Map(communityRecords.map(r => [r.id, r]))
+  let totalCommunityMatches = 0
+  let devicesWithMatches = 0
+
   const baseIp = networkRange.split('/')[0].split('.').slice(0, 3).join('.') + '.1'
   const numDevices = Math.floor(Math.random() * 3) + 3
   const selectedTemplates = MOCK_DEVICE_TEMPLATES.slice(0, numDevices)
@@ -168,7 +193,8 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     const { vulnerabilityChecks, ...deviceInsert } = deviceData
 
     const vulnDefs = VULNERABILITY_DEFINITIONS.filter(v => vulnerabilityChecks.includes(v.checkKey))
-    const riskScore = calculateRiskScore(vulnDefs)
+    const matches: MatchResult[] = communityEnabled ? matchDevice(deviceInsert, communityRecords) : []
+    const riskScore = calculateRiskScoreWithMatches(vulnDefs, matches)
     const riskLevel = getRiskLevel(riskScore)
 
     const { data: insertedDevice } = await supabase
@@ -188,11 +214,41 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
         created_at: new Date().toISOString(),
       }))
       await supabase.from('vulnerabilities').insert(vulnerabilities)
+    }
+
+    if (insertedDevice && matches.length > 0) {
+      const { error: matchError } = await supabase.from('device_vulnerability_matches').insert(matches.map(m => ({
+        device_id: insertedDevice.id,
+        scan_id: scanId,
+        vulnerability_id: m.vulnerability_id,
+        vulnerability_snapshot: snapshotOf(recordById.get(m.vulnerability_id)!),
+        match_type: m.match_type,
+        match_confidence: m.match_confidence,
+        matched_fields: m.matched_fields,
+        matched_reason: m.matched_reason,
+        risk_score_added: m.risk_score_added,
+        created_at: new Date().toISOString(),
+      })))
+      if (matchError) {
+        console.error('[SentriX] could not save community vulnerability matches (run database/migrate_community_vulnerabilities.sql?):', matchError.message)
+      }
+      totalCommunityMatches += matches.length
+      devicesWithMatches++
+    }
+
+    if (insertedDevice && (vulnDefs.length > 0 || matches.length > 0)) {
       totalVulnerable++
       if (riskLevel === 'critical') totalCritical++
     }
 
     deviceRiskScores.push(riskScore)
+  }
+
+  if (communityEnabled) {
+    await supabase.from('audit_logs').insert({
+      user_id: userId, action: 'community_vuln_matching_completed',
+      details: { scan_id: scanId, devices_matched: devicesWithMatches, total_matches: totalCommunityMatches },
+    })
   }
 
   await supabase.from('scans').update({ progress: 90 }).eq('id', scanId)

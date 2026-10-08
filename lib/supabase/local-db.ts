@@ -22,7 +22,8 @@ function cred(vendor: string, username: string, password: string, risk_level: st
 
 // ─── In-memory data store ────────────────────────────────────────────────────
 
-const db: Record<string, Row[]> = {
+function seedData(): Record<string, Row[]> {
+  return {
   users: [
     {
       id: 'a0000000-0000-0000-0000-000000000001',
@@ -314,6 +315,8 @@ const db: Record<string, Row[]> = {
     cred('Generic', 'default', 'default', 'high'),
   ],
   audit_logs: [],
+  // Per-scan community vulnerability matches (the records themselves live in data/vulnerabilities.txt)
+  device_vulnerability_matches: [],
   vulnerability_checks: [
     { id: 'd0000001-0000-0000-0000-000000000001', name: 'Default Credentials Check', slug: 'default_credentials', description: 'Detect whether CCTV devices use known vendor default usernames and passwords.', severity: 'critical', risk_score: 35, recommendation: 'Change all default credentials immediately and use strong unique passwords.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     { id: 'd0000001-0000-0000-0000-000000000002', name: 'Weak Authentication Detection', slug: 'weak_auth', description: 'Detect weak passwords or insecure authentication methods.', severity: 'high', risk_score: 25, recommendation: 'Enforce strong password policies and disable weak authentication methods.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
@@ -330,7 +333,22 @@ const db: Record<string, Row[]> = {
     { id: 'd0000001-0000-0000-0000-000000000013', name: 'Risk Scoring System', slug: 'risk_scoring', description: 'Calculate overall device and network risk levels based on detected vulnerabilities.', severity: 'informational', risk_score: 0, recommendation: 'Address high-risk vulnerabilities first.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     { id: 'd0000001-0000-0000-0000-000000000014', name: 'Known CVE Mapping', slug: 'cve_mapping', description: 'Map detected firmware versions and services against known CVEs.', severity: 'high', risk_score: 20, recommendation: 'Patch vulnerable systems immediately.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
     { id: 'd0000001-0000-0000-0000-000000000015', name: 'Session Cookie Security Check', slug: 'session_cookies', description: 'Analyze web session cookies for missing Secure, HttpOnly, and SameSite attributes.', severity: 'medium', risk_score: 10, recommendation: 'Configure secure cookie settings.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { id: 'd0000001-0000-0000-0000-000000000016', name: 'Community Vulnerability Mapping', slug: 'community-vulnerability-mapping', description: 'Maps detected CCTV device details against the SentriX community-maintained vulnerability database.', severity: 'high', risk_score: 0, recommendation: 'Review matched vulnerability records, update firmware, disable exposed services, and follow vendor security hardening guidance.', enabled: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
   ],
+}
+}
+
+// Kept on globalThis so every API route shares ONE store. Next.js compiles each
+// route separately (especially in `next dev`), so a plain module-level object
+// would give each route its own copy — a scan created by POST /api/scans would
+// then be invisible to /api/scans/[id]/start.
+const globalStore = globalThis as typeof globalThis & { __sentrixLocalDb?: Record<string, Row[]> }
+const db: Record<string, Row[]> = (globalStore.__sentrixLocalDb ??= seedData())
+
+/** Test helper: discard all in-memory data and re-seed. */
+export function resetLocalDb() {
+  for (const key of Object.keys(db)) delete db[key]
+  Object.assign(db, seedData())
 }
 
 // ─── Helper ──────────────────────────────────────────────────────────────────

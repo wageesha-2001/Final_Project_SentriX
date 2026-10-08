@@ -1,5 +1,6 @@
-import { Scan, Device, Vulnerability, RiskLevel } from '@/types'
+import { Scan, Device, Vulnerability, RiskLevel, EnrichedMatch } from '@/types'
 import { formatDate } from '@/lib/utils'
+import { REPORT_NOTE, SEVERITIES, confidenceLabel } from '@/lib/vuln-db/constants'
 
 function esc(str: unknown): string {
   return String(str ?? '')
@@ -12,6 +13,80 @@ function esc(str: unknown): string {
 
 interface DeviceWithVulns extends Device {
   vulnerabilities: Vulnerability[]
+  community_matches?: EnrichedMatch[]
+}
+
+const SEVERITY_COLORS: Record<string, string> = {
+  Critical: '#ff3b5c', High: '#fb923c', Medium: '#ffcc00', Low: '#60a5fa', Informational: '#a78bfa',
+}
+
+function severityBadge(severity: string): string {
+  const color = SEVERITY_COLORS[severity] || '#718096'
+  return `<span style="background:${color}20;color:${color};border:1px solid ${color}40;padding:2px 10px;border-radius:4px;font-size:12px;font-weight:bold;text-transform:uppercase">${esc(severity)}</span>`
+}
+
+function safeHref(url: string): string | null {
+  return /^https?:\/\//i.test(url) ? url : null
+}
+
+function communitySectionHtml(devices: DeviceWithVulns[]): string {
+  const withMatches = devices.filter(d => (d.community_matches?.length ?? 0) > 0)
+  const all = devices.flatMap(d => d.community_matches ?? [])
+  const dist = SEVERITIES.map(sev => ({ sev, count: all.filter(m => m.vulnerability.severity === sev).length }))
+  const recommendations = Array.from(new Set(all.map(m => m.vulnerability.recommendation)))
+
+  const summary = all.length === 0
+    ? '<p style="color:#00ff9d">No community vulnerability records were matched to the devices in this scan.</p>'
+    : `<p><strong>${all.length}</strong> community vulnerability match${all.length === 1 ? '' : 'es'} were found across <strong>${withMatches.length}</strong> of ${devices.length} devices.
+       Highest matched severity: ${severityBadge(dist.find(d => d.count > 0)!.sev)}</p>`
+
+  const distHtml = `<table style="border-collapse:collapse;font-size:13px;margin:12px 0">
+    <tr>${dist.map(d => `<td style="padding:6px 14px;text-align:center;border:1px solid #1e2d3d"><div style="font-size:20px;font-weight:bold;color:${SEVERITY_COLORS[d.sev]}">${d.count}</div><div style="color:#718096;font-size:11px">${esc(d.sev)}</div></td>`).join('')}</tr>
+  </table>`
+
+  const deviceTables = withMatches.map(d => `
+    <h4 style="margin:18px 0 8px;color:#e2e8f0">${esc(d.vendor)} ${esc(d.model)} <span style="color:#718096;font-weight:normal;font-size:12px">${esc(d.ip_address)}</span></h4>
+    <table style="width:100%;border-collapse:collapse;font-size:13px;color:#e2e8f0">
+      <thead><tr style="background:#0f1629">
+        <th style="padding:8px;text-align:left;color:#00d4ff">Vulnerability</th>
+        <th style="padding:8px;text-align:left;color:#00d4ff">Severity</th>
+        <th style="padding:8px;text-align:left;color:#00d4ff">Confidence</th>
+        <th style="padding:8px;text-align:left;color:#00d4ff">Risk +</th>
+        <th style="padding:8px;text-align:left;color:#00d4ff">Matched reason</th>
+        <th style="padding:8px;text-align:left;color:#00d4ff">Recommendation</th>
+      </tr></thead>
+      <tbody>${(d.community_matches ?? []).map(m => {
+        const href = safeHref(m.vulnerability.reference_url)
+        return `<tr>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d"><strong>${esc(m.vulnerability.title)}</strong><br>
+            <span style="color:#718096;font-size:11px">${esc(m.vulnerability.vuln_id)} &middot; ${esc(m.vulnerability.category)} &middot; ${esc(m.vulnerability.source_type)}${href ? ` &middot; <a href="${esc(href)}" style="color:#00d4ff">reference</a>` : ''}</span></td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d">${severityBadge(m.vulnerability.severity)}</td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d">${esc(confidenceLabel(m.match_confidence))}</td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d">+${esc(m.risk_score_added)}</td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:12px;color:#718096">${esc(m.matched_reason)}</td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:12px;color:#718096">${esc(m.vulnerability.recommendation)}</td>
+        </tr>`
+      }).join('')}</tbody>
+    </table>`).join('')
+
+  return `
+<div class="section">
+  <div class="section-title">COMMUNITY VULNERABILITY SUMMARY</div>
+  <div class="summary-box">
+    ${summary}
+    ${distHtml}
+    <p style="font-size:13px"><strong>Match confidence:</strong></p>
+    <ul style="font-size:13px;color:#a0aec0">
+      <li><strong>High</strong> — vendor and exact model (or model pattern with firmware) match. Full risk score applied.</li>
+      <li><strong>Medium</strong> — vendor matches together with a model pattern, firmware, port or protocol. 75% of the risk score applied.</li>
+      <li><strong>Potential Match (Low)</strong> — broad match on a generic record, vendor only, or device type/keywords. 50% of the risk score applied; verify before acting.</li>
+    </ul>
+    ${deviceTables}
+    ${recommendations.length > 0 ? `<p style="margin-top:18px"><strong>Recommendations for matched vulnerabilities:</strong></p>
+    <ul style="font-size:13px">${recommendations.map(r => `<li>${esc(r)}</li>`).join('')}</ul>` : ''}
+    <p style="margin-top:18px;padding:10px 14px;border-left:3px solid #ffcc00;background:#ffcc0010;font-size:12px;color:#a0aec0"><strong>Note:</strong> ${esc(REPORT_NOTE)}</p>
+  </div>
+</div>`
 }
 
 function getRiskBadgeHtml(risk: RiskLevel): string {
@@ -124,6 +199,8 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
     </ul>
   </div>
 </div>
+
+${communitySectionHtml(devices)}
 
 <div class="section">
   <div class="section-title">DEVICE ANALYSIS</div>

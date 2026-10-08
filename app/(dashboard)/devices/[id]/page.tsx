@@ -6,7 +6,9 @@ import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
-import { Device, Vulnerability } from '@/types'
+import { Device, Vulnerability, EnrichedMatch } from '@/types'
+import { MatchCard } from '@/components/vuln-db/MatchCard'
+import { calculateTrustScore } from '@/lib/risk/calculator'
 import { formatDate } from '@/lib/utils'
 import { Cpu, Wifi, Shield, AlertTriangle, CheckCircle, Server } from 'lucide-react'
 
@@ -14,11 +16,12 @@ export default function DeviceDetailsPage() {
   const { id } = useParams<{ id: string }>()
   const [device, setDevice] = useState<Device | null>(null)
   const [vulns, setVulns] = useState<Vulnerability[]>([])
+  const [matches, setMatches] = useState<EnrichedMatch[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetch(`/api/devices/${id}`).then(r => r.json()).then(d => {
-      if (d.data) { setDevice(d.data.device); setVulns(d.data.vulnerabilities) }
+      if (d.data) { setDevice(d.data.device); setVulns(d.data.vulnerabilities); setMatches(d.data.community_matches ?? []) }
     }).finally(() => setLoading(false))
   }, [id])
 
@@ -51,7 +54,7 @@ export default function DeviceDetailsPage() {
               { label: 'Device Type', value: device.device_type.toUpperCase(), icon: Server },
               { label: 'Firmware', value: device.firmware_version, icon: Shield },
               { label: 'Open Ports', value: device.open_ports.length.toString(), icon: Wifi },
-              { label: 'Vulnerabilities', value: vulns.length.toString(), icon: AlertTriangle },
+              { label: 'Vulnerabilities', value: (vulns.length + matches.length).toString(), icon: AlertTriangle },
             ].map(item => (
               <div key={item.label} className="bg-cyber-surface rounded-lg p-3">
                 <item.icon className="w-4 h-4 text-cyber-muted mb-1" />
@@ -90,7 +93,9 @@ export default function DeviceDetailsPage() {
               <div className="relative h-3 bg-cyber-surface rounded-full overflow-hidden border border-cyber-border">
                 <div className="h-full scan-progress-bar rounded-full" style={{ width: `${device.risk_score}%` }} />
               </div>
-              <p className="text-right text-xs text-cyber-muted mt-1 font-mono">{device.risk_score}/100</p>
+              <p className="text-right text-xs text-cyber-muted mt-1 font-mono">
+                Risk {device.risk_score}/100 · Trust {calculateTrustScore(device.risk_score)}/100
+              </p>
             </div>
           </motion.div>
         </div>
@@ -123,6 +128,25 @@ export default function DeviceDetailsPage() {
                   </div>
                 </motion.div>
               ))}
+            </div>
+          )}
+        </motion.div>
+
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="cyber-card p-5">
+          <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-1">
+            Community Vulnerability Matches ({matches.length})
+          </h3>
+          <p className="text-xs text-cyber-muted mb-4">
+            Matched against the community vulnerability database. Some matches may be approximate — verify against official vendor advisories before remediation.
+          </p>
+          {matches.length === 0 ? (
+            <div className="flex items-center gap-3 p-4 bg-cyber-green/5 border border-cyber-green/20 rounded-lg">
+              <CheckCircle className="w-5 h-5 text-cyber-green" />
+              <p className="text-xs text-cyber-text-muted">No community vulnerability records matched this device.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {matches.map(m => <MatchCard key={m.id} match={m} />)}
             </div>
           )}
         </motion.div>

@@ -2,7 +2,9 @@
 // Not suitable for multi-process deployments — swap for Redis in production.
 
 interface Window { timestamps: number[] }
-const store = new Map<string, Window>()
+// Shared across API routes (each route is compiled separately).
+const globalStore = globalThis as typeof globalThis & { __sentrixRateLimit?: Map<string, Window> }
+const store = (globalStore.__sentrixRateLimit ??= new Map<string, Window>())
 
 export function rateLimit(key: string, maxRequests: number, windowMs: number): boolean {
   const now = Date.now()

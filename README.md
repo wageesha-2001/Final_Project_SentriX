@@ -10,6 +10,7 @@ SentriX is a full-stack cybersecurity dashboard for automated IP CCTV network se
 
 - **Automated Network Scanning** — Discovers IP CCTV cameras, NVRs, and DVRs on a given subnet
 - **Vulnerability Detection** — Checks for default credentials, open RTSP streams, HTTP-only interfaces, Telnet services, outdated firmware, and more
+- **Community Vulnerability Database** — Maps detected devices to a locally maintained / GitHub-hosted knowledge base of CCTV weaknesses (see below)
 - **Risk Scoring** — Calculates per-device risk scores (0–100) and overall network risk level
 - **Professional Reports** — Generates detailed HTML security reports with executive summary and remediation guidance
 - **Role-Based Access** — Admin and Technician roles with JWT authentication
@@ -74,7 +75,15 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
 JWT_SECRET=your-minimum-32-character-secret-key-here
 NEXT_PUBLIC_APP_URL=http://localhost:3000
+
+# Community Vulnerability Database (optional — defaults shown)
+COMMUNITY_VULN_DB_ENABLED=true
+COMMUNITY_VULN_DB_LOCAL_PATH=data/vulnerabilities.txt
+COMMUNITY_VULN_DB_REMOTE_URL=
+COMMUNITY_VULN_DB_SYNC_MODE=local
 ```
+
+Existing Supabase installs: also run `database/migrate_community_vulnerabilities.sql` in the SQL Editor.
 
 **Where to find Supabase keys:**
 - Dashboard → Settings → API → Project URL and anon/public key
@@ -155,12 +164,15 @@ sentrix/
 │   ├── supabase/              # Database clients
 │   ├── scanner/               # Mock scanner + report generator
 │   ├── risk/                  # Risk scoring calculator
+│   ├── vuln-db/               # Community vulnerability DB: validator, sync, matcher
 │   ├── validators/            # Zod schemas
 │   └── utils/                 # Helper functions
+├── data/                      # vulnerabilities.txt + format guide
 ├── types/                     # TypeScript type definitions
 ├── database/
 │   ├── schema.sql             # PostgreSQL schema
-│   └── seed.sql               # Initial data
+│   ├── seed.sql               # Initial data
+│   └── migrate_community_vulnerabilities.sql  # Add the community DB to an existing install
 └── middleware.ts              # Next.js edge middleware (auth guard)
 ```
 
@@ -178,6 +190,7 @@ sentrix/
 | `settings` | Per-user scanner settings |
 | `default_credentials` | Vendor default credential database |
 | `audit_logs` | All system actions for compliance |
+| `device_vulnerability_matches` | Per-scan community vulnerability matches (list itself is in `data/vulnerabilities.txt`) |
 
 ---
 
@@ -219,6 +232,113 @@ pm2 startup
 #   location / { proxy_pass http://localhost:3000; }
 # }
 ```
+
+---
+
+## Community Vulnerability Database
+
+SentriX keeps a **community-maintained list of CCTV / IP camera weaknesses in one plain text file**:
+`data/vulnerabilities.txt`. There is **no database for this data** — SentriX reads the file directly, so anyone can update
+it with a text editor. The file can also be hosted in a public GitHub repo so the community can improve it through pull requests.
+
+| File | Purpose |
+|---|---|
+| `data/vulnerabilities.txt` | The vulnerability list (134 sample records, easy-to-edit `Label: value` blocks) |
+| `data/vulnerability-schema.md` | Every label, allowed values, validation rules, how to contribute |
+
+A record looks like this (blocks are separated by `---`):
+
+```text
+ID: SXV-2026-0001
+Title: HTTP-Only Interface on DS-2CD2 series cameras
+Vendor: Hikvision
+Models: DS-2CD2043G0-I, DS-2CD2143G0-I
+Firmware: V5.5.*
+Device Type: camera
+Category: HTTP-Only Interface
+Severity: Medium
+CVSS: 5.3
+Risk Score: 14
+Ports: 80
+Protocols: HTTP
+Keywords: hikvision, http only
+Source: SIMULATED
+Published: 2025-09-01
+Updated: 2025-09-08
+Description: The web management interface is served over unencrypted HTTP ...
+Recommendation: Enable HTTPS for the management interface.
+Steps:
+- Enable HTTPS in the device network settings.
+- Disable or redirect the plain HTTP listener.
+Note: SIMULATED record created for academic demonstration.
+---
+```
+
+> The shipped records are **demonstration data** (`SIMULATED` / `COMMUNITY_REPORTED`), not confirmed vulnerabilities.
+> No CVE IDs are invented and the file contains no exploit code.
+
+### Update the vulnerability data
+
+1. Edit `data/vulnerabilities.txt` — copy a block, change the values, save.
+2. Sign in as **admin**, open **Vulnerability DB**, click **Reload local file** (the file is also re-read automatically when a scan starts after it changed).
+3. Mistakes are listed with the record number and reason; all valid records still load.
+
+### Configure and sync from GitHub
+
+```env
+COMMUNITY_VULN_DB_ENABLED=true
+COMMUNITY_VULN_DB_LOCAL_PATH=data/vulnerabilities.txt
+COMMUNITY_VULN_DB_REMOTE_URL=https://raw.githubusercontent.com/<username>/sentrix-vuln-db/main/vulnerabilities.txt
+COMMUNITY_VULN_DB_SYNC_MODE=both      # local | remote | both
+```
+
+Put the same text file in your public repo, restart SentriX, and click **Sync from GitHub**.
+
+- `local` uses only the local file; `remote` uses the GitHub file (falling back to local); `both` merges them, and when the same ID is in both, the one with the newer `Updated` date wins.
+- Only `https://raw.githubusercontent.com/...` URLs are accepted (10 s timeout, 5 MB limit, redirects refused).
+- If GitHub is unreachable: *"Remote vulnerability database is unavailable. Local data will be used."*
+- Reloads and syncs are recorded in **Audit Logs** and shown in the page's history.
+
+### How matching confidence works
+
+During a scan, each discovered device is compared with the records using vendor, model, firmware, device type, open ports,
+protocols and keywords. SentriX is deliberately conservative:
+
+| Confidence | Condition | Risk applied |
+|---|---|---|
+| **High** | Vendor + exact model (or model wildcard + firmware) | 100 % of the record's `Risk Score` |
+| **Medium** | Vendor + model wildcard, firmware, port or protocol | 75 % |
+| **Low** — shown as **Potential Match** | Generic record, vendor-only, or broad keyword match | 50 % |
+
+For each device only the strongest match per category is kept, and at most 3 Potential Matches are shown.
+
+### How risk scoring uses matches
+
+`device risk = min(100, scanner findings + Σ matched Risk Score × confidence factor)` and `trust score = 100 − risk`.
+Risk Score bands: Critical 30–40, High 20–29, Medium 10–19, Low 1–9, Informational 0.
+The feature is switched on/off by **Community Vulnerability Mapping** under *Settings → Enabled Vulnerability Checks*
+(admin only). Matches appear on the scan results page, the device details page and in reports. Technicians can view matches
+but cannot reload, sync, or change settings.
+
+What is saved in the app database: only the **per-scan match results** (`device_vulnerability_matches`, including a copy of the
+matched record so old scans and reports stay readable after the file changes). The vulnerability list itself is never copied into a table.
+
+> A device that triggers both a built-in check and a community record for the same weakness is scored by both.
+> Treat the score as a prioritisation aid, not an exact measurement.
+
+### Contribute new vulnerability records
+
+1. Fork the public vulnerability repo and add block(s) to `vulnerabilities.txt` following `data/vulnerability-schema.md`.
+2. Use an honest `Source`; use `VENDOR_ADVISORY` / `CVE` only with a real reference / real CVE ID.
+3. Run `npm test` — it validates the file and reports any bad record.
+4. Open a pull request. After it is merged, an admin clicks **Sync from GitHub**.
+
+Records must describe weaknesses and fixes only — **no exploit code, payloads, passwords, or attack instructions**.
+
+### Ethical usage
+
+The list exists for **defensive identification and reporting**. Matches are indicators, not proof: verify them against
+official vendor advisories before remediation, and only audit networks you own or are explicitly authorised to test.
 
 ---
 

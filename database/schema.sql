@@ -152,3 +152,23 @@ ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE default_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vulnerability_checks ENABLE ROW LEVEL SECURITY;
+
+-- Community Vulnerability Mapping: per-scan matches (records live in data/vulnerabilities.txt)
+CREATE TABLE IF NOT EXISTS device_vulnerability_matches (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+  scan_id UUID REFERENCES scans(id) ON DELETE CASCADE,
+  vulnerability_id TEXT NOT NULL,            -- record ID from the text file
+  vulnerability_snapshot JSONB,              -- copy of the matched record at scan time
+  match_type TEXT NOT NULL,
+  match_confidence TEXT NOT NULL CHECK (match_confidence IN ('High', 'Medium', 'Low')),
+  matched_fields JSONB DEFAULT '[]',
+  matched_reason TEXT,
+  risk_score_added INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dvm_device_id ON device_vulnerability_matches(device_id);
+CREATE INDEX IF NOT EXISTS idx_dvm_scan_id ON device_vulnerability_matches(scan_id);
+
+ALTER TABLE device_vulnerability_matches ENABLE ROW LEVEL SECURITY;

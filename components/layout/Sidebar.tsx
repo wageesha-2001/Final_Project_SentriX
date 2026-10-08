@@ -6,7 +6,7 @@ import { motion } from 'framer-motion'
 import {
   LayoutDashboard, Search, History, Cpu, FileText,
   Settings, Shield, LogOut, ChevronLeft, ChevronRight, Info,
-  Users, ClipboardList
+  Users, ClipboardList, Database
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { useState } from 'react'
@@ -18,6 +18,7 @@ const navItems = [
   { href: '/scans', label: 'Scan History', icon: History },
   { href: '/devices', label: 'Devices', icon: Cpu },
   { href: '/reports', label: 'Reports', icon: FileText },
+  { href: '/community-vulns', label: 'Vulnerability DB', icon: Database },
   { href: '/settings', label: 'Settings', icon: Settings },
   { href: '/about', label: 'About / Ethics', icon: Info },
 ]

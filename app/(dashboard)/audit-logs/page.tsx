@@ -30,10 +30,19 @@ const ACTION_LABELS: Record<string, string> = {
   disable_all: 'Checks Disabled (All)',
   user_created: 'User Created',
   user_deleted: 'User Deleted',
+  vuln_db_local_import_started: 'Local Vulnerability Import Started',
+  vuln_db_local_import_completed: 'Local Vulnerability Import Completed',
+  vuln_db_local_import_failed: 'Local Vulnerability Import Failed',
+  vuln_db_github_sync_started: 'GitHub Vulnerability Sync Started',
+  vuln_db_github_sync_completed: 'GitHub Vulnerability Sync Completed',
+  vuln_db_github_sync_failed: 'GitHub Vulnerability Sync Failed',
+  community_vuln_matching_started: 'Community Vulnerability Matching Started',
+  community_vuln_matching_completed: 'Community Vulnerability Matching Completed',
+  vuln_db_settings_updated: 'Vulnerability Database Settings Updated',
 }
 
 function getActionColor(action: string): string {
-  if (action === 'login_failed') return 'text-cyber-red'
+  if (action === 'login_failed' || action.endsWith('_failed')) return 'text-cyber-red'
   if (action === 'scan_started' || action === 'scan_completed') return 'text-cyber-green'
   return 'text-cyber-accent'
 }
@@ -58,6 +67,14 @@ function getDetailsSummary(action: string, details: Record<string, unknown>): st
     const name = details.name as string | undefined
     const enabled = details.enabled
     if (name) return `${name} — ${enabled ? 'enabled' : 'disabled'}`
+  }
+  if (action.startsWith('vuln_db_') && action !== 'vuln_db_settings_updated') {
+    const d = details as Record<string, unknown>
+    if (d.total !== undefined) return `${d.loaded} loaded, ${d.skipped} skipped of ${d.total}`
+    if (d.source_url) return String(d.source_url)
+  }
+  if (action === 'community_vuln_matching_completed' && details.total_matches !== undefined) {
+    return `${details.total_matches} matches on ${details.devices_matched} devices`
   }
   const first = Object.entries(details)[0]
   if (first) return `${first[0]}: ${String(first[1])}`

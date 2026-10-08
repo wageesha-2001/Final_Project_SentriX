@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireAuth } from '@/lib/auth/middleware'
 import { createServerSupabase } from '@/lib/supabase/server'
+import { getEnrichedMatches } from '@/lib/vuln-db/queries'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(req)
@@ -26,5 +27,6 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       .in('device_id', deviceIds)
     vulnerabilities = vulns || []
   }
-  return NextResponse.json({ data: { scan, devices: devices || [], vulnerabilities } })
+  const community_matches = await getEnrichedMatches(supabase, deviceIds)
+  return NextResponse.json({ data: { scan, devices: devices || [], vulnerabilities, community_matches } })
 }
