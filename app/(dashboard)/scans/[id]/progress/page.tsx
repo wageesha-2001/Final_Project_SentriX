@@ -101,7 +101,7 @@ export default function ScanProgressPage() {
               {scan.status === 'running' && (
                 <div className="mt-4 grid grid-cols-3 gap-3 text-center">
                   {[
-                    { label: 'Devices Found', value: scan.total_devices, icon: Cpu, color: 'text-cyber-accent' },
+                    { label: 'CCTV Devices Found', value: scan.total_devices, icon: Cpu, color: 'text-cyber-accent' },
                     { label: 'Vulnerable', value: scan.vulnerable_devices, icon: AlertTriangle, color: 'text-cyber-yellow' },
                     { label: 'Critical', value: scan.critical_devices, icon: Shield, color: 'text-cyber-red' },
                   ].map(item => (
@@ -128,11 +128,11 @@ export default function ScanProgressPage() {
                 {scan.status === 'running' && (
                   <>
                     <p className="text-cyber-accent animate-pulse">[*] Progress: {progress}%</p>
-                    <p className="text-cyber-text-muted">[~] Devices discovered: {scan.total_devices}</p>
+                    <p className="text-cyber-text-muted">[~] CCTV devices identified: {scan.total_devices}</p>
                   </>
                 )}
                 {scan.status === 'completed' && (
-                  <p className="text-cyber-green">[✓] Scan completed — {scan.total_devices} devices found</p>
+                  <p className="text-cyber-green">[✓] Scan completed — {scan.total_devices} CCTV devices identified (non-CCTV hosts skipped)</p>
                 )}
               </div>
             </motion.div>
@@ -155,7 +155,7 @@ export default function ScanProgressPage() {
       </div>
 
       <ConfirmDialog isOpen={showStop} title="Stop Scan" variant="warning"
-        message="Are you sure you want to stop this scan? Partial results will be saved."
+        message="Are you sure you want to stop this scan? Devices already analysed are kept with the stopped scan, but stopped scans are not included in the dashboard, device inventory or reports."
         confirmLabel={stopping ? 'Stopping...' : 'Stop Scan'} cancelLabel="Continue Scanning"
         onConfirm={handleStop} onCancel={() => setShowStop(false)} />
     </DashboardLayout>

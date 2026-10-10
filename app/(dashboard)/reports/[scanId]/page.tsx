@@ -15,12 +15,24 @@ export default function ReportPage() {
   const { scanId } = useParams<{ scanId: string }>()
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
 
   useEffect(() => {
     fetch(`/api/reports/${scanId}`).then(r => r.json()).then(d => {
       if (d.data) setReport(d.data)
     }).finally(() => setLoading(false))
   }, [scanId])
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await fetch(`/api/reports/${scanId}/generate`, { method: 'POST' })
+      const d = await res.json()
+      if (res.ok && d.data) { setReport(d.data); toast.success('Report generated!') }
+      else toast.error(d.error || 'Failed to generate report')
+    } catch { toast.error('Error generating report') }
+    finally { setGenerating(false) }
+  }
 
   const handleDownload = () => {
     if (!report) return
@@ -42,7 +54,19 @@ export default function ReportPage() {
   }
 
   if (loading) return <DashboardLayout title="Report"><LoadingSpinner size="lg" className="h-64" /></DashboardLayout>
-  if (!report) return <DashboardLayout title="Report"><EmptyState icon={FileText} title="Report not found" description="Generate a report from the scan results page." /></DashboardLayout>
+  if (!report) return (
+    <DashboardLayout title="Report">
+      <EmptyState icon={FileText} title="Report not generated yet"
+        description="Generate the security report for this scan to view and download it."
+        action={
+          <button onClick={handleGenerate} disabled={generating}
+            className="cyber-btn-primary flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold">
+            {generating ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <FileText className="w-4 h-4" />}
+            {generating ? 'Generating...' : 'Generate Report'}
+          </button>
+        } />
+    </DashboardLayout>
+  )
 
   return (
     <DashboardLayout title="Security Report" subtitle={report.report_title}

@@ -1,4 +1,4 @@
-import { Vulnerability, RiskLevel } from '@/types'
+import { Vulnerability, RiskLevel, MatchConfidence, SecurityStatus } from '@/types'
 
 export interface VulnDefinition {
   title: string
@@ -133,6 +133,21 @@ export function calculateRiskScoreWithMatches(
     vulnerabilities.reduce((sum, v) => sum + v.score, 0) +
     matches.reduce((sum, m) => sum + m.risk_score_added, 0)
   return Math.min(total, 100)
+}
+
+/**
+ * Security status of a discovered device:
+ *   vulnerable — confirmed check findings, or a High/Medium community match
+ *   potential  — only low-confidence "Potential Match" results to review
+ *   secure     — nothing found
+ */
+export function getSecurityStatus(
+  findingsCount: number,
+  matches: { match_confidence: MatchConfidence }[],
+): SecurityStatus {
+  if (findingsCount > 0 || matches.some(m => m.match_confidence !== 'Low')) return 'vulnerable'
+  if (matches.length > 0) return 'potential'
+  return 'secure'
 }
 
 export function calculateTrustScore(riskScore: number): number {

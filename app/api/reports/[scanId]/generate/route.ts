@@ -14,6 +14,9 @@ export async function POST(req: NextRequest, { params }: { params: { scanId: str
   if (user!.role !== 'admin' && scan.user_id !== user!.sub) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  if (scan.status !== 'completed') {
+    return NextResponse.json({ error: 'Reports can only be generated for completed scans.' }, { status: 400 })
+  }
   const { data: devices } = await supabase.from('devices').select('*').eq('scan_id', params.scanId)
   const allMatches = await getEnrichedMatches(supabase, (devices || []).map((d: Record<string, unknown>) => d.id as string))
   const devicesWithVulns = await Promise.all(

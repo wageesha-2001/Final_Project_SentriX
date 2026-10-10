@@ -24,6 +24,7 @@ const ACTION_LABELS: Record<string, string> = {
   scan_created: 'Scan Created',
   scan_started: 'Scan Started',
   scan_stopped: 'Scan Stopped',
+  scan_completed: 'Scan Completed',
   report_generated: 'Report Generated',
   vulnerability_check_toggled: 'Check Toggled',
   enable_all: 'Checks Enabled (All)',
@@ -39,6 +40,7 @@ const ACTION_LABELS: Record<string, string> = {
   community_vuln_matching_started: 'Community Vulnerability Matching Started',
   community_vuln_matching_completed: 'Community Vulnerability Matching Completed',
   vuln_db_settings_updated: 'Vulnerability Database Settings Updated',
+  cctv_discovery_completed: 'CCTV Discovery Completed',
 }
 
 function getActionColor(action: string): string {
@@ -72,6 +74,15 @@ function getDetailsSummary(action: string, details: Record<string, unknown>): st
     const d = details as Record<string, unknown>
     if (d.total !== undefined) return `${d.loaded} loaded, ${d.skipped} skipped of ${d.total}`
     if (d.source_url) return String(d.source_url)
+  }
+  if (action === 'scan_completed' && details.cctv_devices !== undefined) {
+    return `${details.scan_name ?? 'Scan'} (${details.network_range}): ${details.cctv_devices} CCTV devices, ${details.vulnerable_devices} vulnerable, overall ${String(details.overall_risk).toUpperCase()}`
+  }
+  if (action === 'scan_stopped' && details.scan_name) {
+    return `${details.scan_name}${details.network_range ? ` (${details.network_range})` : ''}`
+  }
+  if (action === 'cctv_discovery_completed' && details.hosts_discovered !== undefined) {
+    return `${details.network_range}: ${details.cctv_devices_identified} CCTV devices identified, ${details.non_cctv_hosts_skipped} non-CCTV hosts skipped`
   }
   if (action === 'community_vuln_matching_completed' && details.total_matches !== undefined) {
     return `${details.total_matches} matches on ${details.devices_matched} devices`

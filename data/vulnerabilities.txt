@@ -15,7 +15,7 @@
 #       Risk Score must fit: Critical 30-40, High 20-29, Medium 10-19, Low 1-9, Informational 0
 #   - Source:  SIMULATED | COMMUNITY_REPORTED | VENDOR_ADVISORY | CVE
 #       (use CVE only with the real CVE id as ID, e.g. CVE-2021-12345)
-#   - Device Type: camera | nvr | dvr | router | any
+#   - Device Type: camera | nvr | dvr | any   (CCTV equipment only)
 #   - Dates: YYYY-MM-DD.   Set Updated to today's date when you change a record.
 #   - Steps: one "- " line per step (or:  Steps: step one | step two).
 #   - Reference is optional (an https:// link). Match Fields is optional.

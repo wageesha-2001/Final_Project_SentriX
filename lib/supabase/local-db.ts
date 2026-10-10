@@ -372,7 +372,9 @@ function projectFields(rows: Row[], fields: string): Row[] {
 class InsertResult {
   constructor(private rows: Row[]) {}
 
-  select(_fields = '*') {
+  // Mirrors Supabase: only the requested columns are returned (never e.g. password_hash)
+  select(fields = '*') {
+    this.rows = projectFields(this.rows, fields)
     return this
   }
 
@@ -537,6 +539,7 @@ class QueryBuilder {
 class UpdateBuilder {
   private _eqFilters: [string, unknown][] = []
   private _neqFilters: [string, unknown][] = []
+  private _inFilters: [string, unknown[]][] = []
   private _fields = '*'
   private _selectCalled = false
   private _applied = false
@@ -556,6 +559,11 @@ class UpdateBuilder {
     return this
   }
 
+  in(field: string, values: unknown[]): this {
+    this._inFilters.push([field, values])
+    return this
+  }
+
   select(fields = '*'): this {
     this._fields = fields
     this._selectCalled = true
@@ -571,7 +579,8 @@ class UpdateBuilder {
     db[table] = db[table].map(row => {
       const matchesEq = this._eqFilters.every(([f, v]) => row[f] === v)
       const matchesNeq = this._neqFilters.every(([f, v]) => row[f] !== v)
-      if (matchesEq && matchesNeq) {
+      const matchesIn = this._inFilters.every(([f, vs]) => vs.includes(row[f]))
+      if (matchesEq && matchesNeq && matchesIn) {
         const updated = { ...row, ...data }
         this._matched.push(updated)
         return updated

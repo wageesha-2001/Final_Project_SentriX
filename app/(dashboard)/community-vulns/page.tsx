@@ -176,7 +176,7 @@ export default function CommunityVulnsPage() {
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-cyber-border">
             <Stat label="Total Records" value={status.total_records} color="text-cyber-accent" />
-            <Stat label="Total Matches" value={status.total_matches} color="text-cyber-yellow" />
+            <Stat label="Matches on Current Devices" value={status.total_matches} color="text-cyber-yellow" />
             <div className="text-center">
               <p className={cn('text-sm font-bold', status.enabled ? 'text-cyber-green' : 'text-cyber-red')}>{status.enabled ? 'Enabled' : 'Disabled'}</p>
               <p className="text-xs text-cyber-muted uppercase tracking-wider mt-1">Database</p>

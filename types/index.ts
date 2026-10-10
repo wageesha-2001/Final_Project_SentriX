@@ -51,6 +51,15 @@ export interface Device {
   created_at: string;
 }
 
+export type SecurityStatus = 'vulnerable' | 'potential' | 'secure';
+
+/** Device as returned by GET /api/devices, with its security summary. */
+export interface DeviceListItem extends Device {
+  findings_count: number;
+  community_match_count: number;
+  security_status: SecurityStatus;
+}
+
 export type VulnerabilitySeverity = 'low' | 'medium' | 'high' | 'critical';
 
 export interface Vulnerability {
@@ -150,7 +159,7 @@ export interface VulnerabilityCheck {
 export type CommunitySeverity = 'Low' | 'Medium' | 'High' | 'Critical' | 'Informational'
 export type CommunitySourceType = 'SIMULATED' | 'COMMUNITY_REPORTED' | 'VENDOR_ADVISORY' | 'CVE'
 export type MatchConfidence = 'High' | 'Medium' | 'Low'
-export type CommunityDeviceType = 'camera' | 'nvr' | 'dvr' | 'router' | 'any'
+export type CommunityDeviceType = 'camera' | 'nvr' | 'dvr' | 'any'
 export type CommunityMatchField = 'vendor' | 'model' | 'firmware' | 'device_type' | 'port' | 'protocol' | 'keyword'
 
 /** One record as it appears in vulnerabilities.json (the public schema). */

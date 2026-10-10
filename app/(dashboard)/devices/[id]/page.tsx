@@ -2,13 +2,14 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
+import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { Device, Vulnerability, EnrichedMatch } from '@/types'
 import { MatchCard } from '@/components/vuln-db/MatchCard'
-import { calculateTrustScore } from '@/lib/risk/calculator'
+import { calculateTrustScore, getSecurityStatus } from '@/lib/risk/calculator'
 import { formatDate } from '@/lib/utils'
 import { Cpu, Wifi, Shield, AlertTriangle, CheckCircle, Server } from 'lucide-react'
 
@@ -17,11 +18,12 @@ export default function DeviceDetailsPage() {
   const [device, setDevice] = useState<Device | null>(null)
   const [vulns, setVulns] = useState<Vulnerability[]>([])
   const [matches, setMatches] = useState<EnrichedMatch[]>([])
+  const [scan, setScan] = useState<{ id: string; scan_name: string; status: string; started_at: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetch(`/api/devices/${id}`).then(r => r.json()).then(d => {
-      if (d.data) { setDevice(d.data.device); setVulns(d.data.vulnerabilities); setMatches(d.data.community_matches ?? []) }
+      if (d.data) { setDevice(d.data.device); setVulns(d.data.vulnerabilities); setMatches(d.data.community_matches ?? []); setScan(d.data.scan ?? null) }
     }).finally(() => setLoading(false))
   }, [id])
 
@@ -29,6 +31,12 @@ export default function DeviceDetailsPage() {
   if (!device) return <DashboardLayout title="Device Details"><div className="text-cyber-muted text-center py-20">Device not found</div></DashboardLayout>
 
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
+  const securityStatus = getSecurityStatus(vulns.length, matches)
+  const STATUS_STYLE = {
+    vulnerable: { label: 'Vulnerable', className: 'text-cyber-red border-cyber-red/30 bg-cyber-red/10' },
+    potential: { label: 'Potential issues', className: 'text-cyber-purple border-cyber-purple/30 bg-cyber-purple/10' },
+    secure: { label: 'Secure', className: 'text-cyber-green border-cyber-green/30 bg-cyber-green/10' },
+  }[securityStatus]
   const sortedVulns = [...vulns].sort((a, b) => (severityOrder[a.severity] ?? 4) - (severityOrder[b.severity] ?? 4))
 
   return (
@@ -43,10 +51,18 @@ export default function DeviceDetailsPage() {
               <div>
                 <h2 className="text-xl font-bold text-white">{device.vendor} {device.model}</h2>
                 <p className="text-cyber-muted font-mono text-sm">{device.ip_address}</p>
-                <p className="text-xs text-cyber-text-muted mt-0.5">MAC: {device.mac_address} | First seen: {formatDate(device.created_at)}</p>
+                <p className="text-xs text-cyber-text-muted mt-0.5">MAC: {device.mac_address || 'Not available (needs device login / same-segment access)'} | Scanned: {formatDate(device.created_at)}</p>
+                {scan && (
+                  <p className="text-xs text-cyber-text-muted mt-0.5">
+                    Scan: <Link href={`/scans/${scan.id}`} className="text-cyber-accent hover:underline">{scan.scan_name}</Link>
+                  </p>
+                )}
               </div>
             </div>
-            <RiskBadge level={device.risk_level} showScore={device.risk_score} size="lg" />
+            <div className="flex flex-col items-end gap-2">
+              <RiskBadge level={device.risk_level} showScore={device.risk_score} size="lg" />
+              <span className={`px-2 py-0.5 rounded border text-xs font-semibold ${STATUS_STYLE.className}`}>{STATUS_STYLE.label}</span>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-cyber-border">
@@ -54,7 +70,7 @@ export default function DeviceDetailsPage() {
               { label: 'Device Type', value: device.device_type.toUpperCase(), icon: Server },
               { label: 'Firmware', value: device.firmware_version, icon: Shield },
               { label: 'Open Ports', value: device.open_ports.length.toString(), icon: Wifi },
-              { label: 'Vulnerabilities', value: (vulns.length + matches.length).toString(), icon: AlertTriangle },
+              { label: 'Failed Checks / DB Matches', value: `${vulns.length} / ${matches.length}`, icon: AlertTriangle },
             ].map(item => (
               <div key={item.label} className="bg-cyber-surface rounded-lg p-3">
                 <item.icon className="w-4 h-4 text-cyber-muted mb-1" />
@@ -102,14 +118,16 @@ export default function DeviceDetailsPage() {
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="cyber-card p-5">
           <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-4">
-            Vulnerabilities ({vulns.length})
+            Failed Security Checks ({vulns.length})
           </h3>
           {sortedVulns.length === 0 ? (
             <div className="flex items-center gap-3 p-4 bg-cyber-green/5 border border-cyber-green/20 rounded-lg">
               <CheckCircle className="w-5 h-5 text-cyber-green" />
               <div>
-                <p className="text-sm font-semibold text-cyber-green">No Vulnerabilities Detected</p>
-                <p className="text-xs text-cyber-text-muted">This device passed all security checks.</p>
+                <p className="text-sm font-semibold text-cyber-green">No Failed Security Checks</p>
+                <p className="text-xs text-cyber-text-muted">
+                  This device passed all enabled security checks.{matches.length > 0 ? ' Review the community vulnerability matches below.' : ''}
+                </p>
               </div>
             </div>
           ) : (

@@ -42,6 +42,8 @@ export interface MatchResult {
 export const MAX_LOW_CONFIDENCE_MATCHES = 3
 
 const CONFIDENCE_RANK: Record<MatchConfidence, number> = { High: 3, Medium: 2, Low: 1 }
+const WEB_MANAGEMENT_PORTS = new Set([80, 443, 8080, 8443])
+const WEB_MANAGEMENT_PROTOCOLS = new Set(['http', 'https', 'http-alt'])
 const ALL_FIELDS: CommunityMatchField[] = ['vendor', 'model', 'firmware', 'device_type', 'port', 'protocol', 'keyword']
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
@@ -148,7 +150,12 @@ function evaluate(device: MatchableDevice, rec: MatchableRecord): MatchResult | 
     confidence = 'Low'
     matchType = 'vendor_only'
   } else if (typeHit || serviceHit || kwHits.length > 0) {
-    if (!serviceHit && kwHits.length === 0) return null // device type alone is too weak
+    // Every CCTV device has a web management interface, so a generic record
+    // matching only on 80/443/8080 (HTTP/HTTPS) is no evidence of the weakness.
+    const strongServiceHit =
+      portHits.some(p => !WEB_MANAGEMENT_PORTS.has(p)) ||
+      protoHits.some(p => !WEB_MANAGEMENT_PROTOCOLS.has(norm(p)))
+    if (!strongServiceHit && kwHits.length === 0) return null // device type / web port alone is too weak
     confidence = 'Low'
     matchType = serviceHit ? 'generic_service' : 'keyword'
   } else {

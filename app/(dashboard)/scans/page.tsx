@@ -86,13 +86,13 @@ export default function ScanHistoryPage() {
                            <span className="text-sm text-white">{scan.total_devices}</span>
                          </div>
                        </td>
-                       <td className="px-4 py-3"><RiskBadge level={scan.overall_risk} size="sm" /></td>
+                       <td className="px-4 py-3">{scan.status === 'completed' ? <RiskBadge level={scan.overall_risk} size="sm" /> : <span className="text-xs text-cyber-muted">—</span>}</td>
                        <td className="px-4 py-3 text-xs text-cyber-text-muted">{formatDate(scan.started_at)}</td>
                        <td className="px-4 py-3 text-xs text-cyber-muted font-mono">
                          {scan.completed_at ? formatDuration(scan.started_at, scan.completed_at) : '—'}
                        </td>
                        <td className="px-4 py-3">
-                         <Link href={scan.status === 'running' ? `/scans/${scan.id}/progress` : `/scans/${scan.id}`}
+                         <Link href={scan.status === 'running' || scan.status === 'pending' ? `/scans/${scan.id}/progress` : `/scans/${scan.id}`}
                            className="p-1.5 rounded text-cyber-muted hover:text-cyber-accent transition-colors">
                            <ExternalLink className="w-4 h-4" />
                          </Link>

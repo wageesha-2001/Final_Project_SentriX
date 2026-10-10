@@ -1,5 +1,6 @@
 import { Scan, Device, Vulnerability, RiskLevel, EnrichedMatch } from '@/types'
 import { formatDate } from '@/lib/utils'
+import { getSecurityStatus } from '@/lib/risk/calculator'
 import { REPORT_NOTE, SEVERITIES, confidenceLabel } from '@/lib/vuln-db/constants'
 
 function esc(str: unknown): string {
@@ -98,11 +99,40 @@ function getRiskBadgeHtml(risk: RiskLevel): string {
 }
 
 export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): string {
-  const secureDevices = devices.filter(d => d.risk_level === 'secure').length
-  const vulnerableDevices = devices.filter(d => d.risk_level !== 'secure').length
+  // Same classification as the dashboard, Devices page and scan results
+  const statusOf = (d: DeviceWithVulns) => getSecurityStatus(d.vulnerabilities.length, d.community_matches ?? [])
+  const secureDevices = devices.filter(d => statusOf(d) === 'secure').length
+  const potentialDevices = devices.filter(d => statusOf(d) === 'potential').length
+  const vulnerableDevices = devices.filter(d => statusOf(d) === 'vulnerable').length
+  const criticalRiskDevices = devices.filter(d => d.risk_level === 'critical').length
   const allVulns = devices.flatMap(d => d.vulnerabilities)
-  const criticalVulns = allVulns.filter(v => v.severity === 'critical').length
-  const highVulns = allVulns.filter(v => v.severity === 'high').length
+  // Confirmed issues: check findings plus High/Medium-confidence database matches
+  const confidentMatches = devices.flatMap(d => (d.community_matches ?? []).filter(m => m.match_confidence !== 'Low'))
+  const criticalVulns = allVulns.filter(v => v.severity === 'critical').length +
+    confidentMatches.filter(m => m.vulnerability.severity === 'Critical').length
+  const highVulns = allVulns.filter(v => v.severity === 'high').length +
+    confidentMatches.filter(m => m.vulnerability.severity === 'High').length
+  // Key findings: each distinct issue once, with how many devices it affects
+  const keyFindings = new Map<string, { severity: 'CRITICAL' | 'HIGH'; title: string; devices: Set<string> }>()
+  const addFinding = (severity: 'CRITICAL' | 'HIGH', title: string, deviceId: string) => {
+    const key = `${severity}|${title}`
+    if (!keyFindings.has(key)) keyFindings.set(key, { severity, title, devices: new Set() })
+    keyFindings.get(key)!.devices.add(deviceId)
+  }
+  for (const d of devices) {
+    for (const v of d.vulnerabilities) {
+      if (v.severity === 'critical') addFinding('CRITICAL', v.title, d.id)
+      if (v.severity === 'high') addFinding('HIGH', v.title, d.id)
+    }
+    for (const m of (d.community_matches ?? []).filter(x => x.match_confidence !== 'Low')) {
+      if (m.vulnerability.severity === 'Critical') addFinding('CRITICAL', m.vulnerability.title, d.id)
+      if (m.vulnerability.severity === 'High') addFinding('HIGH', m.vulnerability.title, d.id)
+    }
+  }
+  const keyFindingsHtml = Array.from(keyFindings.values())
+    .sort((a, b) => (a.severity === b.severity ? b.devices.size - a.devices.size : a.severity === 'CRITICAL' ? -1 : 1))
+    .map(f => `<li style="color:${f.severity === 'CRITICAL' ? '#ff3b5c' : '#fb923c'}">${f.severity}: ${esc(f.title)} <span style="color:#718096">(${f.devices.size} device${f.devices.size === 1 ? '' : 's'})</span></li>`)
+    .join('')
 
   const devicesHtml = devices.map(device => {
     const vulnsHtml = device.vulnerabilities.length > 0
@@ -112,7 +142,7 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
           <td style="padding:8px;border-bottom:1px solid #1e2d3d">${getRiskBadgeHtml(v.severity as RiskLevel)}</td>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:13px;color:#718096">${esc(v.recommendation)}</td>
         </tr>`).join('')
-      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No vulnerabilities detected</td></tr>'
+      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No failed security checks (see Community Vulnerability Summary for database matches)</td></tr>'
 
     return `
       <div style="background:#111827;border:1px solid #1e2d3d;border-radius:8px;padding:20px;margin-bottom:20px">
@@ -179,24 +209,21 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
 </div>
 
 <div class="stat-grid">
-  <div class="stat-card"><div class="stat-value" style="color:#00d4ff">${devices.length}</div><div class="stat-label">Total Devices</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#00d4ff">${devices.length}</div><div class="stat-label">CCTV Devices</div></div>
   <div class="stat-card"><div class="stat-value" style="color:#00ff9d">${secureDevices}</div><div class="stat-label">Secure Devices</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#a78bfa">${potentialDevices}</div><div class="stat-label">Potential Issues</div></div>
   <div class="stat-card"><div class="stat-value" style="color:#ffcc00">${vulnerableDevices}</div><div class="stat-label">Vulnerable Devices</div></div>
-  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${scan.critical_devices}</div><div class="stat-label">Critical Risk</div></div>
-  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalVulns}</div><div class="stat-label">Critical Vulns</div></div>
-  <div class="stat-card"><div class="stat-value" style="color:#fb923c">${highVulns}</div><div class="stat-label">High Vulns</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalRiskDevices}</div><div class="stat-label">Critical Risk Devices</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalVulns}</div><div class="stat-label">Critical Issues</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#fb923c">${highVulns}</div><div class="stat-label">High Issues</div></div>
 </div>
 
 <div class="section">
   <div class="section-title">EXECUTIVE SUMMARY</div>
   <div class="summary-box">
-    <p>This security audit was conducted on the network range <strong>${esc(scan.network_range)}</strong> on ${formatDate(scan.started_at)}. The scan discovered <strong>${devices.length} active IP CCTV devices</strong>, of which <strong>${vulnerableDevices} devices (${Math.round(vulnerableDevices/Math.max(devices.length,1)*100)}%)</strong> were found to have security vulnerabilities.</p>
-    <p>The overall network security posture is rated as <strong>${esc(scan.overall_risk.toUpperCase())}</strong>. ${criticalVulns > 0 ? `There are <strong style="color:#ff3b5c">${criticalVulns} critical vulnerabilities</strong> that require immediate attention.` : 'No critical vulnerabilities were detected.'}</p>
-    <p><strong>Key Findings:</strong></p>
-    <ul>
-      ${allVulns.filter(v=>v.severity==='critical').map(v=>`<li style="color:#ff3b5c">CRITICAL: ${esc(v.title)}</li>`).join('')}
-      ${allVulns.filter(v=>v.severity==='high').map(v=>`<li style="color:#fb923c">HIGH: ${esc(v.title)}</li>`).join('')}
-    </ul>
+    <p>This security audit was conducted on the network range <strong>${esc(scan.network_range)}</strong> on ${formatDate(scan.started_at)}. The scan identified <strong>${devices.length} IP CCTV device${devices.length === 1 ? '' : 's'}</strong> (non-CCTV hosts are excluded from the audit). <strong>${vulnerableDevices} device${vulnerableDevices === 1 ? '' : 's'} (${Math.round(vulnerableDevices / Math.max(devices.length, 1) * 100)}%)</strong> ${vulnerableDevices === 1 ? 'has' : 'have'} confirmed security issues, ${potentialDevices} ${potentialDevices === 1 ? 'has' : 'have'} only potential matches to review, and ${secureDevices} ${secureDevices === 1 ? 'is' : 'are'} secure.</p>
+    <p>The overall network security posture is rated as <strong>${esc(scan.overall_risk.toUpperCase())}</strong>. ${criticalVulns > 0 ? `There ${criticalVulns === 1 ? 'is' : 'are'} <strong style="color:#ff3b5c">${criticalVulns} critical issue${criticalVulns === 1 ? '' : 's'}</strong> that require${criticalVulns === 1 ? 's' : ''} immediate attention.` : 'No critical issues were detected.'}</p>
+    ${keyFindingsHtml ? `<p><strong>Key Findings:</strong></p><ul>${keyFindingsHtml}</ul>` : ''}
   </div>
 </div>
 

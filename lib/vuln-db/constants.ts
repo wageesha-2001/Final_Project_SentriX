@@ -10,7 +10,7 @@ export const COMMUNITY_CHECK_SLUG = 'community-vulnerability-mapping'
 
 export const SEVERITIES: CommunitySeverity[] = ['Critical', 'High', 'Medium', 'Low', 'Informational']
 export const SOURCE_TYPES: CommunitySourceType[] = ['SIMULATED', 'COMMUNITY_REPORTED', 'VENDOR_ADVISORY', 'CVE']
-export const DEVICE_TYPES: CommunityDeviceType[] = ['camera', 'nvr', 'dvr', 'router', 'any']
+export const DEVICE_TYPES: CommunityDeviceType[] = ['camera', 'nvr', 'dvr', 'any']
 export const MATCH_FIELDS: CommunityMatchField[] = ['vendor', 'model', 'firmware', 'device_type', 'port', 'protocol', 'keyword']
 
 export const CATEGORIES = [

@@ -8,7 +8,8 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
-import { Scan, Device, Vulnerability, EnrichedMatch } from '@/types'
+import { Scan, Device, Vulnerability, EnrichedMatch, SecurityStatus } from '@/types'
+import { getSecurityStatus } from '@/lib/risk/calculator'
 import { MatchCard, SEVERITY_CLASS } from '@/components/vuln-db/MatchCard'
 import { SEVERITIES } from '@/lib/vuln-db/constants'
 import { formatDate, formatDuration, cn } from '@/lib/utils'
@@ -16,11 +17,26 @@ import { Cpu, Shield, AlertTriangle, FileText, ExternalLink, ChevronDown, Chevro
 import toast from 'react-hot-toast'
 
 interface DeviceWithVulns extends Device { vulnerabilities: Vulnerability[]; community_matches: EnrichedMatch[] }
+interface DiscoverySummary { mode: string; hosts_discovered: number; cctv_devices_identified: number }
+
+/** Explain why a scan stored no devices, so an empty result isn't mistaken for a bug. */
+function emptyScanReason(scan: Scan, discovery: DiscoverySummary | null): string {
+  if (!discovery) return `The scan of ${scan.network_range} did not find any CCTV devices.`
+  if (discovery.mode === 'real') {
+    return discovery.hosts_discovered === 0
+      ? `No host in ${scan.network_range} answered on any CCTV port (23, 80, 443, 554, 8000, 8080, 37777). ` +
+        'Check that this server can reach that network (VPN, routing, firewall) and that the range is correct.'
+      : `${discovery.hosts_discovered} host(s) in ${scan.network_range} responded, but none showed enough CCTV evidence (RTSP, ONVIF, vendor API) to be classified as a CCTV device.`
+  }
+  return `Simulation mode: none of the demo CCTV hosts fall inside ${scan.network_range}. ` +
+    'Start the server with SENTRIX_REAL_SCAN=1 to probe the real network.'
+}
 
 export default function ScanResultsPage() {
   const { id } = useParams<{ id: string }>()
   const [scan, setScan] = useState<Scan | null>(null)
   const [devices, setDevices] = useState<DeviceWithVulns[]>([])
+  const [discovery, setDiscovery] = useState<DiscoverySummary | null>(null)
   const [loading, setLoading] = useState(true)
   const [generatingReport, setGeneratingReport] = useState(false)
   const [expandedDevice, setExpandedDevice] = useState<string | null>(null)
@@ -34,6 +50,7 @@ export default function ScanResultsPage() {
       .then(data => {
         if (data.data) {
           setScan(data.data.scan)
+          setDiscovery(data.data.discovery ?? null)
           const devMap = new Map(data.data.devices.map((d: Device) => [d.id, { ...d, vulnerabilities: [], community_matches: [] }]))
           data.data.vulnerabilities.forEach((v: Vulnerability) => {
             const dev = devMap.get(v.device_id) as DeviceWithVulns | undefined
@@ -54,12 +71,14 @@ export default function ScanResultsPage() {
     try {
       const res = await fetch(`/api/reports/${id}/generate`, { method: 'POST' })
       if (res.ok) { toast.success('Report generated!'); window.location.href = `/reports/${id}` }
-      else toast.error('Failed to generate report')
+      else toast.error((await res.json().catch(() => ({}))).error || 'Failed to generate report')
     } catch { toast.error('Error generating report') }
     finally { setGeneratingReport(false) }
   }
 
   const allMatches = useMemo(() => devices.flatMap(d => d.community_matches), [devices])
+  const statusCount = (status: SecurityStatus) =>
+    devices.filter(d => getSecurityStatus(d.vulnerabilities.length, d.community_matches) === status).length
   const filterActive = !!(severityFilter || vendorFilter || categoryFilter)
   const matchPasses = (m: EnrichedMatch) =>
     (!severityFilter || m.vulnerability.severity === severityFilter) &&
@@ -88,22 +107,44 @@ export default function ScanResultsPage() {
               <p className="text-cyber-text-muted text-xs mt-1">{formatDate(scan.started_at)}
                 {scan.completed_at && ` • Duration: ${formatDuration(scan.started_at, scan.completed_at)}`}</p>
             </div>
-            <div className="flex items-center gap-3">
-              <RiskBadge level={scan.overall_risk} size="lg" />
-              <button onClick={handleGenerateReport} disabled={generatingReport}
-                className="cyber-btn-primary px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
-                {generatingReport ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                {generatingReport ? 'Generating...' : 'Generate Report'}
-              </button>
+            <div className="flex flex-wrap items-center gap-3">
+              {scan.status === 'completed' ? (
+                <>
+                  <RiskBadge level={scan.overall_risk} size="lg" />
+                  <Link href={`/devices?scan=${scan.id}`}
+                    className="px-4 py-2 rounded-lg border border-cyber-border text-xs text-cyber-text-muted hover:text-white hover:border-cyber-muted transition-colors flex items-center gap-2">
+                    <Cpu className="w-3.5 h-3.5" /> View Devices
+                  </Link>
+                  <button onClick={handleGenerateReport} disabled={generatingReport}
+                    className="cyber-btn-primary px-4 py-2 rounded-lg text-xs font-bold flex items-center gap-2">
+                    {generatingReport ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                    {generatingReport ? 'Generating...' : 'Generate Report'}
+                  </button>
+                </>
+              ) : (
+                <span className="px-3 py-1.5 rounded-lg border border-cyber-border text-xs font-bold uppercase text-cyber-yellow">
+                  {scan.status}
+                </span>
+              )}
             </div>
           </div>
+          {scan.status === 'running' || scan.status === 'pending' ? (
+            <p className="mt-4 text-sm text-cyber-text-muted">
+              This scan is still in progress. <Link href={`/scans/${scan.id}/progress`} className="text-cyber-accent hover:underline">View live progress</Link>
+            </p>
+          ) : scan.status === 'stopped' ? (
+            <p className="mt-4 text-sm text-cyber-yellow">
+              This scan was stopped before it finished. Only the devices analysed before the stop are shown; stopped scans are not included in the dashboard, device inventory or reports.
+            </p>
+          ) : null}
 
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-5 pt-5 border-t border-cyber-border">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-4 mt-5 pt-5 border-t border-cyber-border">
             {[
-              { label: 'Total Devices', value: scan.total_devices, color: 'text-cyber-accent' },
-              { label: 'Secure', value: scan.total_devices - scan.vulnerable_devices, color: 'text-cyber-green' },
-              { label: 'Vulnerable', value: scan.vulnerable_devices, color: 'text-cyber-yellow' },
-              { label: 'Critical', value: scan.critical_devices, color: 'text-cyber-red' },
+              { label: 'CCTV Devices', value: devices.length, color: 'text-cyber-accent' },
+              { label: 'Secure', value: statusCount('secure'), color: 'text-cyber-green' },
+              { label: 'Potential Issues', value: statusCount('potential'), color: 'text-cyber-purple' },
+              { label: 'Vulnerable', value: statusCount('vulnerable'), color: 'text-cyber-yellow' },
+              { label: 'Critical', value: devices.filter(d => d.risk_level === 'critical').length, color: 'text-cyber-red' },
             ].map(stat => (
               <div key={stat.label} className="text-center">
                 <p className={`text-2xl font-black ${stat.color}`}>{stat.value}</p>
@@ -158,7 +199,7 @@ export default function ScanResultsPage() {
             )}
           </div>
           {devices.length === 0 ? (
-            <EmptyState icon={Cpu} title="No devices discovered" description="The scan did not find any devices on the network." />
+            <EmptyState icon={Cpu} title="No CCTV devices discovered" description={emptyScanReason(scan, discovery)} />
           ) : visibleDevices.length === 0 ? (
             <EmptyState icon={Cpu} title="No devices match the selected filters" />
           ) : (
@@ -173,7 +214,7 @@ export default function ScanResultsPage() {
                     </div>
                     <div>
                       <p className="font-semibold text-white text-sm">{device.vendor} {device.model}</p>
-                      <p className="text-xs text-cyber-muted font-mono">{device.ip_address} • {device.mac_address}</p>
+                      <p className="text-xs text-cyber-muted font-mono">{device.ip_address}{device.mac_address ? ` • ${device.mac_address}` : ''}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">

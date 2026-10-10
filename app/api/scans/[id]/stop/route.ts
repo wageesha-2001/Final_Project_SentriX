@@ -12,14 +12,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (user!.role !== 'admin' && scan.user_id !== user!.sub) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  // Only a pending or running scan can be stopped — never overwrite a finished one
+  if (scan.status !== 'running' && scan.status !== 'pending') {
+    return NextResponse.json({ error: `Scan is already ${scan.status}` }, { status: 400 })
+  }
   await supabase.from('scans').update({
     status: 'stopped',
     completed_at: new Date().toISOString(),
-  }).eq('id', params.id)
+  }).eq('id', params.id).in('status', ['running', 'pending'])
   await supabase.from('audit_logs').insert({
     user_id: user!.sub,
     action: 'scan_stopped',
-    details: { scan_id: params.id },
+    details: { scan_id: params.id, scan_name: scan.scan_name, network_range: scan.network_range },
   })
   return NextResponse.json({ message: 'Scan stopped' })
 }

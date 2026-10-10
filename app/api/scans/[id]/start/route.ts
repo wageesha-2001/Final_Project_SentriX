@@ -20,15 +20,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (scan.status === 'running') {
     return NextResponse.json({ error: 'Scan is already running' }, { status: 400 })
   }
+  // A scan runs once; re-running a finished scan would duplicate its devices. Start a new scan instead.
+  if (scan.status !== 'pending') {
+    return NextResponse.json({ error: `Scan is already ${scan.status}. Start a new scan instead.` }, { status: 400 })
+  }
 
   // Atomically claim the scan: only proceed if this request is the one that
   // actually flipped the status, so concurrent start requests for the same
   // scan can't both launch a runMockScan pass.
   const { data: claimed } = await supabase
     .from('scans')
-    .update({ status: 'running', progress: 0 })
+    .update({ status: 'running', progress: 0, started_at: new Date().toISOString(), completed_at: null })
     .eq('id', params.id)
-    .neq('status', 'running')
+    .eq('status', 'pending')
     .select()
   if (!claimed || claimed.length === 0) {
     return NextResponse.json({ error: 'Scan is already running' }, { status: 400 })
@@ -40,7 +44,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await supabase.from('audit_logs').insert({
     user_id: user!.sub,
     action: 'scan_started',
-    details: { scan_id: params.id, network_range: scan.network_range, safe_scan_mode: safeScanMode },
+    details: { scan_id: params.id, scan_name: scan.scan_name, network_range: scan.network_range, safe_scan_mode: safeScanMode },
   })
   return NextResponse.json({ message: 'Scan started', data: { scan_id: params.id } })
 }
