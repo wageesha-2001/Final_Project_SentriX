@@ -135,6 +135,49 @@ export function calculateRiskScoreWithMatches(
   return Math.min(total, 100)
 }
 
+/** Community-database category covered by each built-in check. */
+export const CHECK_CATEGORY: Record<string, string> = {
+  default_credentials: 'Default Credentials',
+  weak_auth: 'Weak Authentication',
+  open_ports: 'Open Risky Ports',
+  http_only: 'HTTP-Only Interface',
+  rtsp_exposed: 'RTSP Exposure',
+  outdated_firmware: 'Outdated Firmware',
+  insecure_web: 'Web Interface Security',
+  missing_headers: 'Missing Security Headers',
+  telnet_open: 'Telnet Enabled',
+  onvif_anonymous: 'ONVIF Anonymous Access',
+  internet_exposure: 'Internet Exposure',
+  session_cookies: 'Session Cookie Weakness',
+}
+
+/**
+ * A built-in check and a community record can describe the same weakness
+ * (e.g. the RTSP check and an "RTSP Exposure" record). The weakness is scored
+ * once, at the larger of the two: the match only adds what exceeds the check.
+ * Matches stay in the results (with the reason) so the record is still shown.
+ */
+export function discountOverlappingMatches<M extends { category: string; risk_score_added: number; matched_reason: string }>(
+  checks: Pick<VulnDefinition, 'checkKey' | 'title' | 'score'>[],
+  matches: M[],
+): M[] {
+  const byCategory = new Map<string, { title: string; score: number }>()
+  for (const c of checks) {
+    const cat = CHECK_CATEGORY[c.checkKey]
+    if (cat && (byCategory.get(cat)?.score ?? -1) < c.score) byCategory.set(cat, { title: c.title, score: c.score })
+  }
+  return matches.map(m => {
+    const check = byCategory.get(m.category)
+    if (!check) return m
+    const extra = Math.max(0, m.risk_score_added - check.score)
+    return {
+      ...m,
+      risk_score_added: extra,
+      matched_reason: `${m.matched_reason} Risk already counted by the built-in "${check.title}" check${extra > 0 ? `; adds only the extra ${extra}` : ''}.`,
+    }
+  })
+}
+
 /**
  * Security status of a discovered device:
  *   vulnerable — confirmed check findings, or a High/Medium community match

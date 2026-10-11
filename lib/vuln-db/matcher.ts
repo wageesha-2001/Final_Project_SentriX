@@ -20,6 +20,8 @@ export interface MatchableDevice {
   device_type: string
   open_ports: OpenPort[]
   protocols: string[]
+  /** Address the device was scanned at; used for exposure evidence. */
+  ip_address?: string
 }
 
 export type MatchableRecord = Pick<
@@ -50,6 +52,22 @@ const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 const normVersion = (s: string) => norm(s).replace(/^v(?=\d)/, '')
 const isWildcard = (list: string[]) => list.length === 0 || list.every(x => ['*', 'any'].includes(norm(x)))
 const isGenericVendor = (v: string) => /^(generic|unknown)/.test(norm(v))
+// A device whose vendor could not be identified is not "aligned" with generic
+// records: knowing less about a device must never produce a stronger claim.
+const isGenericDevice = (v: string) => /^generic/.test(norm(v))
+const EXPOSURE_CATEGORY = 'internet exposure'
+
+/** RFC1918, loopback, link-local and CGNAT addresses are not internet-reachable. */
+export function isPrivateIp(ip: string): boolean {
+  const o = ip.trim().split('.').map(Number)
+  if (o.length !== 4 || o.some(n => !Number.isInteger(n) || n < 0 || n > 255)) return true
+  const [a, b] = o
+  return a === 10 || a === 127 || a === 0 ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    (a === 169 && b === 254) ||
+    (a === 100 && b >= 64 && b <= 127)
+}
 
 /** Case-insensitive glob where '*' matches any run of characters. */
 export function globMatch(pattern: string, value: string, normalize: (s: string) => string = norm): boolean {
@@ -69,9 +87,15 @@ function evaluate(device: MatchableDevice, rec: MatchableRecord): MatchResult | 
   const reasons: string[] = []
   const matched: string[] = []
 
+  // Internet exposure is only evidenced by a public address. A device scanned
+  // on a private LAN shows nothing about reachability from the internet.
+  if (norm(rec.category) === EXPOSURE_CATEGORY && (!device.ip_address || isPrivateIp(device.ip_address))) {
+    return null
+  }
+
   // ── Vendor ────────────────────────────────────────────────────────────────
   const vendorSpecific = !isGenericVendor(rec.vendor)
-  const deviceGeneric = isGenericVendor(device.vendor)
+  const deviceGeneric = isGenericDevice(device.vendor)
   let vendorAligned: boolean
   if (vendorSpecific) {
     vendorAligned = norm(device.vendor) === norm(rec.vendor)

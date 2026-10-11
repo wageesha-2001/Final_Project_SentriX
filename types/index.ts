@@ -133,6 +133,7 @@ export interface JWTPayload {
   name: string;
   iat: number;
   exp: number;
+  jti?: string;
 }
 
 export interface ApiResponse<T = unknown> {

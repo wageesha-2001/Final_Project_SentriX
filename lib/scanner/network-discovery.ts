@@ -131,6 +131,11 @@ export function probeHttp(ip: string, port: number, tls: boolean, path = '/', ti
   })
 }
 
+/** probeHttp with one retry (longer timeout) when the request got no answer at all. */
+async function probeHttpRetry(ip: string, port: number, tls: boolean, path: string, timeoutMs: number): Promise<HttpResult | null> {
+  return (await probeHttp(ip, port, tls, path, timeoutMs)) ?? probeHttp(ip, port, tls, path, timeoutMs * 2)
+}
+
 // ── Fingerprinting ───────────────────────────────────────────────────────────
 
 /** Map an HTTP Server header to a vendor. Embedded servers are weak hints. */
@@ -192,7 +197,8 @@ export async function fingerprintHost(
   // RTSP
   let rtspConfirmed = false
   if (ports.has(554)) {
-    const rtsp = await probeRtspOptions(ip, readTimeout)
+    let rtsp = await probeRtspOptions(ip, readTimeout)
+    if (!rtsp.confirmed) rtsp = await probeRtspOptions(ip, readTimeout * 2)
     rtspConfirmed = rtsp.confirmed
     if (rtsp.confirmed) protocols.add('RTSP')
   }
@@ -201,9 +207,9 @@ export async function fingerprintHost(
   const webPort = ports.has(80) ? 80 : ports.has(8080) ? 8080 : null
   const tlsPort = ports.has(443) ? 443 : ports.has(8443) ? 8443 : null
   const root = tlsPort
-    ? await probeHttp(ip, tlsPort, true, '/', readTimeout)
+    ? await probeHttpRetry(ip, tlsPort, true, '/', readTimeout)
     : webPort
-      ? await probeHttp(ip, webPort, false, '/', readTimeout)
+      ? await probeHttpRetry(ip, webPort, false, '/', readTimeout)
       : null
   let headerFirmware = ''
   if (root) {
@@ -224,7 +230,7 @@ export async function fingerprintHost(
     const useTls = !!tlsPort
     for (const vp of VENDOR_PATHS) {
       if (await maybeStop(opts)) break
-      const res = await probeHttp(ip, usePort, useTls, vp.path, readTimeout)
+      const res = await probeHttpRetry(ip, usePort, useTls, vp.path, readTimeout)
       if (res && [200, 401, 403].includes(res.status)) {
         vendorEndpoints.push({ path: vp.path, status: res.status })
         if (vp.vendor === 'Hikvision') { vendor ||= 'Hikvision'; vendorStrong = true; protocols.add('ISAPI') }
@@ -318,13 +324,54 @@ export function enumerateHosts(cidr: string, max = 1024): string[] {
   return ips
 }
 
+type PortProbe = (ip: string, port: number, timeoutMs: number) => Promise<boolean>
+
+/** Ports that every IP camera / NVR answers on; used to re-check silent addresses. */
+const LIVENESS_PORTS = [80, 554]
+
+/**
+ * Find the open ports of one address. A single connect attempt is not
+ * reliable: a dropped SYN (busy device, lossy or routed link) made whole
+ * ports, or whole cameras, disappear from one scan to the next. So:
+ *   1. quick sweep of every port (connectTimeout);
+ *   2. if the host answered, re-check each closed port up to `retries`
+ *      more times with a longer timeout;
+ *   3. if nothing answered, give the core CCTV ports (80/554) one longer try
+ *      before calling the address dead, and if one answers, treat it as (2).
+ * Dead addresses cost only step 3, so large ranges stay reasonably fast.
+ */
+export async function sweepHostPorts(
+  ip: string,
+  opts: { connectTimeoutMs?: number; confirmTimeoutMs?: number; retries?: number; probe?: PortProbe } = {},
+): Promise<{ port: number; service: string }[]> {
+  const probe = opts.probe ?? probeTcpPort
+  const quick = opts.connectTimeoutMs ?? 600
+  const confirm = opts.confirmTimeoutMs ?? 1500
+  const retries = opts.retries ?? 2
+  const open = new Set<number>()
+
+  for (const sp of SCAN_PORTS) if (await probe(ip, sp.port, quick)) open.add(sp.port)
+
+  if (open.size === 0) {
+    for (const port of LIVENESS_PORTS) if (await probe(ip, port, confirm)) open.add(port)
+    if (open.size === 0) return []
+  }
+
+  for (const sp of SCAN_PORTS) {
+    for (let attempt = 0; attempt < retries && !open.has(sp.port); attempt++) {
+      if (await probe(ip, sp.port, confirm)) open.add(sp.port)
+    }
+  }
+  return SCAN_PORTS.filter(sp => open.has(sp.port))
+}
+
 /**
  * Discover live CCTV-capable hosts in a range. For each address we TCP-connect
- * to the port set; any host with at least one open port is fingerprinted.
+ * to the port set (with confirmation retries, see sweepHostPorts); any host
+ * with at least one open port is fingerprinted.
  * Classification (CCTV vs not) is done by the caller via classifyHost.
  */
 export async function discoverHosts(cidr: string, opts: DiscoveryOptions = {}): Promise<RealDiscoveredHost[]> {
-  const connectTimeout = opts.connectTimeoutMs ?? 600
   const concurrency = Math.max(1, opts.concurrency ?? 32)
   const ips = enumerateHosts(cidr)
   const results: RealDiscoveredHost[] = []
@@ -335,10 +382,7 @@ export async function discoverHosts(cidr: string, opts: DiscoveryOptions = {}): 
     while (index < ips.length) {
       if (await maybeStop(opts)) return
       const ip = ips[index++]
-      const open: { port: number; service: string }[] = []
-      for (const sp of SCAN_PORTS) {
-        if (await probeTcpPort(ip, sp.port, connectTimeout)) open.push(sp)
-      }
+      const open = await sweepHostPorts(ip, { connectTimeoutMs: opts.connectTimeoutMs })
       if (open.length > 0) {
         const host = await fingerprintHost(ip, open, opts)
         results.push(host)

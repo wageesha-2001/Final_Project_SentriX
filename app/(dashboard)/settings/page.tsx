@@ -314,6 +314,7 @@ export default function SettingsPage() {
                   </label>
                   <input {...register('login_attempt_limit', { valueAsNumber: true })} type="number" min="3" max="20"
                     className="cyber-input w-full px-4 py-2.5 rounded-lg text-sm" />
+                  {errors.login_attempt_limit && <p className="text-cyber-red text-xs mt-1">{errors.login_attempt_limit.message}</p>}
                 </div>
               </div>
             </div>
@@ -417,11 +418,19 @@ export default function SettingsPage() {
 
                 return (
                   <div key={severity}>
-                    {/* Group header */}
-                    <button
-                      type="button"
+                    {/* Group header: a div with button semantics, because it contains
+                        the enable/disable group buttons (a <button> cannot nest a <button>) */}
+                    <div
+                      role="button"
+                      tabIndex={0}
+                      aria-expanded={!!isOpen}
                       onClick={() => setExpandedGroups(prev => ({ ...prev, [severity]: !prev[severity] }))}
-                      className="w-full flex items-center justify-between px-6 py-3 bg-cyber-surface/40 hover:bg-cyber-surface/70 transition-colors group"
+                      onKeyDown={(e) => {
+                        if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return
+                        e.preventDefault()
+                        setExpandedGroups(prev => ({ ...prev, [severity]: !prev[severity] }))
+                      }}
+                      className="w-full flex items-center justify-between px-6 py-3 bg-cyber-surface/40 hover:bg-cyber-surface/70 transition-colors group cursor-pointer"
                     >
                       <div className="flex items-center gap-3">
                         <SeverityBadge severity={severity} />
@@ -430,10 +439,10 @@ export default function SettingsPage() {
                         </span>
                         {isAdmin && (
                           <span className="hidden group-hover:flex items-center gap-2 ml-2">
-                            <button onClick={(e) => { e.stopPropagation(); handleBulkAction('enable_all', severity) }}
+                            <button type="button" onClick={(e) => { e.stopPropagation(); handleBulkAction('enable_all', severity) }}
                               className="text-[10px] text-cyber-green hover:underline">enable group</button>
                             <span className="text-cyber-border">·</span>
-                            <button onClick={(e) => { e.stopPropagation(); handleBulkAction('disable_all', severity) }}
+                            <button type="button" onClick={(e) => { e.stopPropagation(); handleBulkAction('disable_all', severity) }}
                               className="text-[10px] text-cyber-red hover:underline">disable group</button>
                           </span>
                         )}
@@ -445,7 +454,7 @@ export default function SettingsPage() {
                         </div>
                         {isOpen ? <ChevronUp className="w-4 h-4 text-cyber-muted" /> : <ChevronDown className="w-4 h-4 text-cyber-muted" />}
                       </div>
-                    </button>
+                    </div>
 
                     {/* Check rows */}
                     <AnimatePresence initial={false}>

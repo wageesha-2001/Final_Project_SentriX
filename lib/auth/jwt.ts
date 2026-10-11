@@ -11,8 +11,10 @@ if (jwtSecret.length < 32) {
 const secret = new TextEncoder().encode(jwtSecret)
 
 export async function signToken(payload: Omit<JWTPayload, 'iat' | 'exp'>): Promise<string> {
+  // A unique token id lets a single session be revoked on logout.
   return new SignJWT({ ...payload })
     .setProtectedHeader({ alg: 'HS256' })
+    .setJti(crypto.randomUUID())
     .setIssuedAt()
     .setExpirationTime('24h')
     .sign(secret)

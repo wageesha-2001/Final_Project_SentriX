@@ -8,7 +8,8 @@ import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Report } from '@/types'
 import { formatDate } from '@/lib/utils'
-import { FileText, Download, ExternalLink } from 'lucide-react'
+import { FileText, Download, ExternalLink, SearchX, Lock } from 'lucide-react'
+import Link from 'next/link'
 import toast from 'react-hot-toast'
 
 export default function ReportPage() {
@@ -16,10 +17,16 @@ export default function ReportPage() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  // Why there is no report: only a completed scan without one can generate it
+  const [missing, setMissing] = useState<'scan_not_found' | 'forbidden' | 'not_completed' | 'not_generated'>('not_generated')
 
   useEffect(() => {
-    fetch(`/api/reports/${scanId}`).then(r => r.json()).then(d => {
+    fetch(`/api/reports/${scanId}`).then(async r => {
+      const d = await r.json().catch(() => ({}))
       if (d.data) setReport(d.data)
+      else if (r.status === 403) setMissing('forbidden')
+      else if (d.reason === 'scan_not_found') setMissing('scan_not_found')
+      else if (d.scan_status && d.scan_status !== 'completed') setMissing('not_completed')
     }).finally(() => setLoading(false))
   }, [scanId])
 
@@ -54,6 +61,19 @@ export default function ReportPage() {
   }
 
   if (loading) return <DashboardLayout title="Report"><LoadingSpinner size="lg" className="h-64" /></DashboardLayout>
+  if (!report && missing !== 'not_generated') {
+    const info = {
+      scan_not_found: { icon: SearchX, title: 'Scan not found', description: 'There is no scan with this id. It may have been deleted, or the link is wrong.' },
+      forbidden: { icon: Lock, title: 'You do not have access to this report', description: 'Reports can only be viewed by the user who ran the scan or an admin.' },
+      not_completed: { icon: FileText, title: 'Report not available yet', description: 'Reports can only be generated for completed scans.' },
+    }[missing]
+    return (
+      <DashboardLayout title="Report">
+        <EmptyState icon={info.icon} title={info.title} description={info.description}
+          action={<Link href="/reports" className="cyber-btn-primary px-4 py-2 rounded-lg text-sm font-bold">Back to Reports</Link>} />
+      </DashboardLayout>
+    )
+  }
   if (!report) return (
     <DashboardLayout title="Report">
       <EmptyState icon={FileText} title="Report not generated yet"

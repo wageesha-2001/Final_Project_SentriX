@@ -108,6 +108,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Tokens revoked by logout; a token's jti stays here until it expires
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  jti TEXT PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
@@ -152,6 +160,7 @@ ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE default_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vulnerability_checks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE revoked_tokens ENABLE ROW LEVEL SECURITY;
 
 -- Community Vulnerability Mapping: per-scan matches (records live in data/vulnerabilities.txt)
 CREATE TABLE IF NOT EXISTS device_vulnerability_matches (

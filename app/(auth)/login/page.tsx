@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
@@ -9,10 +9,28 @@ import toast from 'react-hot-toast'
 import { Shield, Lock, Mail, Eye, EyeOff, AlertTriangle } from 'lucide-react'
 import { loginSchema, LoginInput } from '@/lib/validators/schemas'
 
+// Demo accounts are shown only when a deployment opts in explicitly
+// (NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS=1). Inlined at build time, so the block
+// is dropped from the bundle everywhere else.
+const SHOW_DEMO_CREDENTIALS = process.env.NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS === '1'
+
 export default function LoginPage() {
   const router = useRouter()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+
+  // Until React has hydrated, a submit would be a native GET that puts the
+  // email and password in the URL (and server logs). The submit button stays
+  // disabled until then, which also blocks Enter-key submission.
+  const [hydrated, setHydrated] = useState(false)
+  useEffect(() => setHydrated(true), [])
+
+  // Already signed in: go to the dashboard instead of offering a second login.
+  // Checked through /api/auth/me (not in middleware) so a deleted or revoked
+  // session falls back to this form instead of looping between the two pages.
+  useEffect(() => {
+    fetch('/api/auth/me').then(res => { if (res.ok) router.replace('/dashboard') }).catch(() => {})
+  }, [router])
 
   const { register, handleSubmit, formState: { errors } } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -111,7 +129,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={isLoading || !hydrated}
               className="cyber-btn-primary w-full py-3 rounded-lg text-sm tracking-wider font-bold"
             >
               {isLoading ? (
@@ -123,6 +141,7 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {SHOW_DEMO_CREDENTIALS && (
           <div className="mt-6 pt-4 border-t border-cyber-border">
             <p className="text-xs text-cyber-text-muted text-center">Demo credentials:</p>
             <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
@@ -136,6 +155,7 @@ export default function LoginPage() {
               </div>
             </div>
           </div>
+          )}
         </div>
 
         <p className="text-center text-xs text-cyber-text-muted mt-6">

@@ -1,5 +1,5 @@
 import { createServerSupabase } from '@/lib/supabase/server'
-import { calculateRiskScoreWithMatches, getRiskLevel, getSecurityStatus, VULNERABILITY_DEFINITIONS, getOverallScanRisk } from '@/lib/risk/calculator'
+import { calculateRiskScoreWithMatches, getRiskLevel, getSecurityStatus, VULNERABILITY_DEFINITIONS, getOverallScanRisk, discountOverlappingMatches } from '@/lib/risk/calculator'
 import { matchDevice, MatchResult } from '@/lib/vuln-db/matcher'
 import { isCommunityMappingEnabled, snapshotOf } from '@/lib/vuln-db/queries'
 import { getCommunityRecords } from '@/lib/vuln-db/store'
@@ -241,7 +241,10 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     const hosts = await discoverHosts(networkRange, {
       shouldStop: isStoppedNow,
       onProgress: async (done, total) => {
-        await supabase.from('scans').update({ progress: Math.floor((done / total) * 70) }).eq('id', scanId)
+        // Probes already in flight when the scan is stopped still report back;
+        // the progress of a stopped scan must stay where it was stopped.
+        await supabase.from('scans').update({ progress: Math.floor((done / total) * 70) })
+          .eq('id', scanId).eq('status', 'running')
       },
     })
     if (await isStoppedNow()) {
@@ -312,7 +315,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
         return { success: false, devices: 0 }
       }
 
-      await supabase.from('scans').update({ progress }).eq('id', scanId)
+      await supabase.from('scans').update({ progress }).eq('id', scanId).eq('status', 'running')
       await new Promise(r => setTimeout(r, 1000))
 
       allDevices.push({
@@ -355,7 +358,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     },
   })
 
-  await supabase.from('scans').update({ progress: 75 }).eq('id', scanId)
+  await supabase.from('scans').update({ progress: 75 }).eq('id', scanId).eq('status', 'running')
 
   let totalVulnerable = 0
   let totalCritical = 0
@@ -378,7 +381,9 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     const { vulnerabilityChecks, ...deviceInsert } = deviceData
 
     const vulnDefs = VULNERABILITY_DEFINITIONS.filter(v => vulnerabilityChecks.includes(v.checkKey))
-    const matches: MatchResult[] = communityEnabled ? matchDevice(deviceInsert, communityRecords) : []
+    const matches: MatchResult[] = communityEnabled
+      ? discountOverlappingMatches(vulnDefs, matchDevice(deviceInsert, communityRecords))
+      : []
     const riskScore = calculateRiskScoreWithMatches(vulnDefs, matches)
     const riskLevel = getRiskLevel(riskScore)
 
@@ -435,7 +440,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     })
   }
 
-  await supabase.from('scans').update({ progress: 90 }).eq('id', scanId)
+  await supabase.from('scans').update({ progress: 90 }).eq('id', scanId).eq('status', 'running')
   await new Promise(r => setTimeout(r, 1000))
 
   // Stopped while finalising: keep what was analysed, with matching totals

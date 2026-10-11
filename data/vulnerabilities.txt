@@ -3397,3 +3397,909 @@ Steps:
 - Limit access to the interface by source IP.
 Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
 ---
+
+ID: SXV-2026-0135
+Title: Telnet service enabled on Turbo HD DVRs
+Vendor: Hikvision
+Models: DS-7208HQHI-K1, DS-7216HQHI-K1
+Firmware: V4.*
+Device Type: dvr
+Category: Telnet Enabled
+Severity: Critical
+CVSS: 9.0
+Risk Score: 32
+Ports: 23
+Protocols: Telnet
+Keywords: hikvision, turbo hd, dvr, telnet
+Source: SIMULATED
+Published: 2026-08-01
+Updated: 2026-09-02
+Description: A Telnet management service is reachable on the recorder. Telnet sends the login and all session data in clear text and gives shell-level access to the device if the account is compromised. Scope: Hikvision DS-7208HQHI-K1, DS-7216HQHI-K1. Affected firmware: V4.*.
+Recommendation: Disable Telnet and use the web interface or vendor tools over HTTPS for administration.
+Steps:
+- Disable Telnet in the recorder maintenance or network settings.
+- Block TCP 23 to the recorder at the switch or firewall.
+- Update to the latest Turbo HD firmware for the model.
+- Re-run the SentriX scan to confirm port 23 is closed.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0136
+Title: ISAPI management endpoints reachable from untrusted networks
+Vendor: Hikvision
+Models: DS-2CD2*
+Firmware: *
+Device Type: camera
+Category: Insecure API Endpoint
+Severity: High
+CVSS: 7.5
+Risk Score: 24
+Ports: 80, 443
+Protocols: HTTP, HTTPS, ISAPI
+Keywords: hikvision, isapi, api
+Source: COMMUNITY_REPORTED
+Published: 2026-08-02
+Updated: 2026-09-10
+Description: The ISAPI REST interface used for configuration is reachable from networks outside the management VLAN. Weak account settings or outdated firmware on this interface allow configuration to be read or changed remotely. Scope: Hikvision DS-2CD2*.
+Recommendation: Limit ISAPI access to management hosts and keep firmware current.
+Steps:
+- Restrict TCP 80/443 to the VMS and management workstations.
+- Create separate least-privilege accounts for integrations instead of using admin.
+- Enable illegal login lock in the security settings.
+- Apply the latest firmware for the model.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0137
+Title: SNMP v1/v2c enabled with default community on enterprise NVRs
+Vendor: Hikvision
+Models: DS-96*
+Firmware: V4.*
+Device Type: nvr
+Category: SNMP Exposure
+Severity: Medium
+CVSS: 5.3
+Risk Score: 13
+Ports: 161
+Protocols: SNMP
+Keywords: hikvision, snmp, public community
+Source: SIMULATED
+Published: 2026-08-03
+Updated: 2026-08-30
+Description: SNMP v1 or v2c is enabled. These versions use a plain-text community string, and a default or guessable community lets anyone on the network read device inventory, network and storage details. Scope: Hikvision DS-96*. Affected firmware: V4.*.
+Recommendation: Disable SNMP if unused, or switch to SNMPv3 with authentication and encryption.
+Steps:
+- Disable SNMP v1/v2c in the NVR network settings.
+- If monitoring is required, enable SNMPv3 with SHA authentication and AES privacy.
+- Allow UDP 161 only from the monitoring server.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0138
+Title: CGI/RPC management API exposed on Dahua cameras
+Vendor: Dahua
+Models: DH-IPC-HFW*, DH-IPC-HDW*
+Firmware: *
+Device Type: camera
+Category: Insecure API Endpoint
+Severity: High
+CVSS: 8.1
+Risk Score: 26
+Ports: 80, 37777
+Protocols: HTTP, Dahua-DVRIP
+Keywords: dahua, cgi-bin, rpc, api
+Source: COMMUNITY_REPORTED
+Published: 2026-08-04
+Updated: 2026-09-15
+Description: The CGI and RPC management API, and the proprietary service on port 37777, are reachable from untrusted networks. Older firmware on this interface has a history of authentication weaknesses. Scope: Dahua DH-IPC-HFW*, DH-IPC-HDW*.
+Recommendation: Restrict the management API and proprietary service to trusted hosts and apply the latest firmware.
+Steps:
+- Allow TCP 80 and 37777 only from the recorder and management VLAN.
+- Disable P2P / cloud services if not required.
+- Update to the latest firmware from the Dahua support portal.
+- Review user accounts and remove unused ones.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0139
+Title: No login lockout and weak password policy on NVR web login
+Vendor: Dahua
+Models: DHI-NVR41*, DHI-NVR52*
+Firmware: V4.*
+Device Type: nvr
+Category: Weak Authentication
+Severity: High
+CVSS: 7.7
+Risk Score: 25
+Ports: 80, 37777
+Protocols: HTTP, Dahua-DVRIP
+Keywords: dahua, nvr, login lockout, weak password
+Source: SIMULATED
+Published: 2026-08-05
+Updated: 2026-09-01
+Description: The recorder accepts short passwords and does not lock accounts after repeated failed logins, so password guessing against the web or client login is not slowed down. Scope: Dahua DHI-NVR41*, DHI-NVR52*. Affected firmware: V4.*.
+Recommendation: Enforce a strong password policy and enable account lockout.
+Steps:
+- Enable account lock after failed logins in the security settings.
+- Set strong, unique passwords for every account.
+- Restrict login services to the management network.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0140
+Title: Debug and legacy service ports open on XVR recorders
+Vendor: Dahua
+Models: DH-XVR*
+Firmware: *
+Device Type: dvr
+Category: Open Risky Ports
+Severity: High
+CVSS: 7.3
+Risk Score: 23
+Ports: 23, 37777, 37778, 9530
+Protocols: Telnet, Dahua-DVRIP
+Keywords: dahua, xvr, debug port, open ports
+Source: COMMUNITY_REPORTED
+Published: 2026-08-06
+Updated: 2026-09-12
+Description: Several legacy and debug service ports are open on the recorder. Each extra service increases the attack surface and some provide low-level maintenance access. Scope: Dahua DH-XVR*.
+Recommendation: Close every service that the installation does not use.
+Steps:
+- Disable Telnet and debug services in the maintenance menu.
+- Change or block unused proprietary ports at the firewall.
+- Re-scan to confirm only required ports remain open.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0141
+Title: FTP server enabled on Axis fixed dome cameras
+Vendor: Axis
+Models: M30*, P32*
+Firmware: *
+Device Type: camera
+Category: FTP Exposure
+Severity: Medium
+CVSS: 6.5
+Risk Score: 17
+Ports: 21
+Protocols: FTP
+Keywords: axis, ftp, clear text
+Source: SIMULATED
+Published: 2026-08-07
+Updated: 2026-09-03
+Description: The built-in FTP server is enabled. FTP sends usernames, passwords and files in clear text, and it is rarely needed once the camera is commissioned. Scope: Axis M30*, P32*.
+Recommendation: Disable the FTP server and use HTTPS or SFTP-based upload for event images.
+Steps:
+- Disable the FTP server under System > Plain config or Network settings.
+- Switch event uploads to HTTPS or SFTP recipients.
+- Block TCP 21 to the camera.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0142
+Title: Session cookies without Secure/HttpOnly flags on Axis web UI
+Vendor: Axis
+Models: *
+Firmware: *
+Device Type: camera
+Category: Session Cookie Weakness
+Severity: Medium
+CVSS: 5.4
+Risk Score: 14
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: axis, session, cookie
+Source: COMMUNITY_REPORTED
+Reference: https://owasp.org/www-community/controls/SecureCookieAttribute
+Published: 2026-08-08
+Updated: 2026-09-18
+Description: The web interface issues session cookies without the Secure and HttpOnly attributes. Cookies can then travel over plain HTTP or be read by injected script. Scope: Axis any model.
+Recommendation: Use HTTPS only and update to firmware that sets secure cookie attributes.
+Steps:
+- Enable HTTPS and set the connection policy to HTTPS only.
+- Update to the latest AXIS OS LTS or active track release.
+- Log out of the web interface after administration.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0143
+Title: End-of-support firmware track on Q60 PTZ cameras
+Vendor: Axis
+Models: Q60*
+Firmware: *
+Device Type: camera
+Category: Unsupported Firmware
+Severity: High
+CVSS: 7.0
+Risk Score: 21
+Ports: 
+Protocols: 
+Keywords: axis, ptz, end of life, unsupported
+Source: SIMULATED
+Published: 2026-08-09
+Updated: 2026-09-20
+Description: The camera runs a firmware track that no longer receives security updates. Any weakness found after the end of support will remain unpatched. Scope: Axis Q60*.
+Recommendation: Move to a supported AXIS OS track or plan hardware replacement.
+Steps:
+- Check the product support status on the vendor site.
+- Upgrade to a supported LTS track if the hardware allows it.
+- If not, isolate the camera on a restricted VLAN and plan replacement.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0144
+Title: UPnP automatic port forwarding enabled on Uniview NVRs
+Vendor: Uniview
+Models: NVR301*, NVR302*
+Firmware: *
+Device Type: nvr
+Category: UPnP Exposure
+Severity: Medium
+CVSS: 6.1
+Risk Score: 16
+Ports: 1900
+Protocols: UPnP, SSDP
+Keywords: uniview, upnp, port forwarding
+Source: SIMULATED
+Published: 2026-08-10
+Updated: 2026-09-05
+Description: UPnP is enabled, so the recorder can open port forwards on the internet router by itself and expose its web and media services to the internet without the administrator noticing. Scope: Uniview NVR301*, NVR302*.
+Recommendation: Disable UPnP on the recorder and on the router.
+Steps:
+- Disable UPnP in the NVR network settings.
+- Disable UPnP on the site router or firewall.
+- Review the router for existing port forwards to the recorder and remove them.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0145
+Title: Snapshot image URL reachable without authentication
+Vendor: Uniview
+Models: IPC2*
+Firmware: *
+Device Type: camera
+Category: Snapshot URL Exposure
+Severity: High
+CVSS: 7.5
+Risk Score: 22
+Ports: 80
+Protocols: HTTP
+Keywords: uniview, snapshot, jpeg
+Source: COMMUNITY_REPORTED
+Published: 2026-08-11
+Updated: 2026-09-22
+Description: A still-image URL on the camera returns a current picture without asking for credentials, so anyone on the network can view the scene. Scope: Uniview IPC2*.
+Recommendation: Require authentication for snapshot requests and restrict access.
+Steps:
+- Enable authentication for all HTTP services.
+- Update to the latest firmware.
+- Restrict TCP 80 to the recorder and management hosts.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0146
+Title: HTTP Basic authentication accepted on web and RTSP services
+Vendor: Uniview
+Models: *
+Firmware: *
+Device Type: any
+Category: Weak Authentication
+Severity: Medium
+CVSS: 6.5
+Risk Score: 17
+Ports: 80, 554
+Protocols: HTTP, RTSP
+Keywords: uniview, basic auth, digest
+Source: SIMULATED
+Published: 2026-08-12
+Updated: 2026-09-08
+Description: The device accepts HTTP Basic authentication, which sends the password encoded but not encrypted. Over plain HTTP or RTSP the password can be captured on the network. Scope: Uniview any model.
+Recommendation: Use Digest authentication only, and HTTPS for the web interface.
+Steps:
+- Set the authentication mode to Digest for web and RTSP.
+- Enable HTTPS for the web interface.
+- Change passwords that may have been sent with Basic authentication.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0147
+Title: Configuration export not encrypted on Wisenet cameras
+Vendor: Hanwha
+Models: XNV-*, XND-*
+Firmware: *
+Device Type: camera
+Category: Insecure Configuration Backup
+Severity: High
+CVSS: 7.1
+Risk Score: 23
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: hanwha, wisenet, backup, config export
+Source: SIMULATED
+Published: 2026-08-13
+Updated: 2026-09-14
+Description: Exported configuration files are not encrypted. A copy left on a shared drive or laptop reveals network settings and account details for the camera. Scope: Hanwha XNV-*, XND-*.
+Recommendation: Encrypt configuration exports and store them securely.
+Steps:
+- Use the encrypted export option where available.
+- Store backups in an access-controlled location.
+- Delete old exported files from laptops and shared drives.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0148
+Title: Wisenet NVR management services published to the internet
+Vendor: Hanwha
+Models: XRN-*
+Firmware: *
+Device Type: nvr
+Category: Internet Exposure
+Severity: Critical
+CVSS: 9.3
+Risk Score: 34
+Ports: 80, 443, 554, 4520
+Protocols: HTTP, HTTPS, RTSP
+Keywords: hanwha, wisenet, nvr, internet, port forward
+Source: COMMUNITY_REPORTED
+Published: 2026-08-14
+Updated: 2026-09-25
+Description: The recorder web, media and client ports are reachable directly from the internet. Internet-facing recorders are scanned continuously and are the first targets when a new weakness is published. Scope: Hanwha XRN-*.
+Recommendation: Remove direct internet exposure and use a VPN or vendor cloud relay for remote access.
+Steps:
+- Remove port forwards to the recorder on the internet router.
+- Provide remote viewing through a VPN.
+- Confirm from an external network that the ports are closed.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0149
+Title: RTSP streams reachable without authentication on Bosch cameras
+Vendor: Bosch
+Models: FLEXIDOME*, DINION*
+Firmware: *
+Device Type: camera
+Category: RTSP Exposure
+Severity: High
+CVSS: 7.5
+Risk Score: 22
+Ports: 554
+Protocols: RTSP
+Keywords: bosch, rtsp, stream
+Source: COMMUNITY_REPORTED
+Published: 2026-08-15
+Updated: 2026-09-16
+Description: Live video can be requested over RTSP without credentials when the service password is left empty, exposing the camera view to anyone on the network. Scope: Bosch FLEXIDOME*, DINION*.
+Recommendation: Set passwords for all user levels and restrict RTSP access.
+Steps:
+- Set passwords for the service, user and live levels.
+- Restrict TCP/UDP 554 to the VMS.
+- Update to the latest firmware.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0150
+Title: Factory administrator account unchanged on DIVAR recorders
+Vendor: Bosch
+Models: DIVAR*
+Firmware: *
+Device Type: nvr
+Category: Default Credentials
+Severity: Critical
+CVSS: 9.1
+Risk Score: 31
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: bosch, divar, default account
+Source: SIMULATED
+Published: 2026-08-16
+Updated: 2026-09-26
+Description: The administrator account still uses its factory state. Factory values for recorder families are publicly documented, so access depends only on network reachability. Scope: Bosch DIVAR*.
+Recommendation: Set a unique strong administrator password during commissioning.
+Steps:
+- Set a unique strong password for the administrator account.
+- Create named user accounts for operators.
+- Restrict the web interface to the management network.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0151
+Title: ONVIF service allows unauthenticated requests on H5 cameras
+Vendor: Avigilon
+Models: H5*
+Firmware: *
+Device Type: camera
+Category: ONVIF Anonymous Access
+Severity: High
+CVSS: 7.2
+Risk Score: 23
+Ports: 80
+Protocols: ONVIF, HTTP
+Keywords: avigilon, onvif, anonymous
+Source: SIMULATED
+Published: 2026-08-17
+Updated: 2026-09-19
+Description: The ONVIF service answers some requests without credentials. Device information and stream addresses can be read by anyone on the network. Scope: Avigilon H5*.
+Recommendation: Enable ONVIF authentication or disable ONVIF if the VMS uses the native protocol.
+Steps:
+- Enable ONVIF user authentication on the camera.
+- Disable ONVIF if it is not used.
+- Restrict TCP 80 to the VMS.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0152
+Title: Legacy TLS versions accepted on Avigilon recorder
+Vendor: Avigilon
+Models: NVR*
+Firmware: *
+Device Type: nvr
+Category: Weak TLS Configuration
+Severity: Medium
+CVSS: 5.9
+Risk Score: 15
+Ports: 443
+Protocols: HTTPS
+Keywords: avigilon, nvr, tls
+Source: SIMULATED
+Reference: https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html
+Published: 2026-08-18
+Updated: 2026-09-21
+Description: The recorder accepts TLS 1.0 or 1.1 and weak cipher suites, lowering the protection of management and client connections. Scope: Avigilon NVR*.
+Recommendation: Allow only TLS 1.2 or newer with strong cipher suites.
+Steps:
+- Apply the latest server software and OS updates.
+- Disable TLS 1.0/1.1 in the OS or server settings.
+- Replace self-signed certificates with internal CA certificates.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0153
+Title: Web API and media port reachable on Reolink cameras
+Vendor: Reolink
+Models: RLC-*
+Firmware: *
+Device Type: camera
+Category: Insecure API Endpoint
+Severity: High
+CVSS: 7.6
+Risk Score: 24
+Ports: 80, 443, 9000
+Protocols: HTTP, HTTPS
+Keywords: reolink, api, cgi
+Source: COMMUNITY_REPORTED
+Published: 2026-08-19
+Updated: 2026-09-23
+Description: The camera web API and media port 9000 are reachable from untrusted networks. Older firmware on these interfaces has had input-handling weaknesses. Scope: Reolink RLC-*.
+Recommendation: Update firmware and restrict API and media ports to trusted hosts.
+Steps:
+- Update to the latest firmware from the Reolink download center.
+- Allow TCP 80/443/9000 only from the NVR and management hosts.
+- Disable UPnP and P2P if not used.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0154
+Title: UPnP enabled by default on Reolink NVRs
+Vendor: Reolink
+Models: RLN*
+Firmware: *
+Device Type: nvr
+Category: UPnP Exposure
+Severity: Medium
+CVSS: 6.1
+Risk Score: 16
+Ports: 1900
+Protocols: UPnP, SSDP
+Keywords: reolink, nvr, upnp
+Source: SIMULATED
+Published: 2026-08-20
+Updated: 2026-09-24
+Description: UPnP is enabled, allowing the recorder to create router port forwards that expose it to the internet. Scope: Reolink RLN*.
+Recommendation: Disable UPnP on the recorder and the router.
+Steps:
+- Disable UPnP in the NVR network settings.
+- Disable UPnP on the router.
+- Remove any existing port forwards to the NVR.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0155
+Title: Media endpoints reachable without authentication on older Amcrest firmware
+Vendor: Amcrest
+Models: IP2M-*, IP4M-*
+Firmware: *
+Device Type: camera
+Category: Snapshot URL Exposure
+Severity: High
+CVSS: 7.5
+Risk Score: 22
+Ports: 80
+Protocols: HTTP
+Keywords: amcrest, snapshot, audio
+Source: COMMUNITY_REPORTED
+Published: 2026-08-21
+Updated: 2026-09-27
+Description: On older firmware some media endpoints (snapshot or audio) respond without credentials, exposing the camera view or audio to the local network. Scope: Amcrest IP2M-*, IP4M-*.
+Recommendation: Update firmware and restrict access to the camera web service.
+Steps:
+- Update to the latest firmware.
+- Restrict TCP 80 to the recorder and management hosts.
+- Disable audio capture if it is not needed.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0156
+Title: Outdated firmware on Amcrest DVRs
+Vendor: Amcrest
+Models: AMDV*
+Firmware: *
+Device Type: dvr
+Category: Outdated Firmware
+Severity: High
+CVSS: 7.4
+Risk Score: 22
+Ports: 
+Protocols: 
+Keywords: amcrest, dvr, outdated firmware
+Source: SIMULATED
+Published: 2026-08-22
+Updated: 2026-09-28
+Description: The recorder runs firmware older than the latest release and may be missing published security fixes. Scope: Amcrest AMDV*.
+Recommendation: Upgrade to the latest vendor firmware.
+Steps:
+- Download firmware only from the official support site.
+- Back up the configuration before updating.
+- Apply the update and re-run the scan.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0157
+Title: VIGI camera left in factory account state
+Vendor: TP-Link VIGI
+Models: C3*, C4*
+Firmware: *
+Device Type: camera
+Category: Default Credentials
+Severity: Critical
+CVSS: 9.1
+Risk Score: 31
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: tp-link, vigi, default account
+Source: SIMULATED
+Published: 2026-08-23
+Updated: 2026-09-29
+Description: The camera has not been activated with a unique password, or keeps a factory account state that is documented for the product line. Scope: TP-Link VIGI C3*, C4*.
+Recommendation: Activate the camera with a strong unique password and manage it through the NVR or VIGI app.
+Steps:
+- Activate the camera and set a strong unique password.
+- Adopt the camera to the VIGI NVR or management app.
+- Restrict the web interface to the management VLAN.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0158
+Title: VIGI NVR web interface served over HTTP only
+Vendor: TP-Link VIGI
+Models: NVR1*
+Firmware: *
+Device Type: nvr
+Category: HTTP-Only Interface
+Severity: Medium
+CVSS: 5.3
+Risk Score: 14
+Ports: 80
+Protocols: HTTP
+Keywords: tp-link, vigi, nvr, http only
+Source: SIMULATED
+Published: 2026-08-24
+Updated: 2026-09-30
+Description: The recorder web interface uses plain HTTP, so login credentials and session data can be captured on the network. Scope: TP-Link VIGI NVR1*.
+Recommendation: Enable HTTPS and disable plain HTTP.
+Steps:
+- Enable HTTPS in the NVR network settings.
+- Disable or redirect HTTP.
+- Access the NVR only from the management network.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0159
+Title: Telnet or debug console ports open on low-cost ONVIF cameras
+Vendor: Generic ONVIF Camera
+Models: *
+Firmware: *
+Device Type: camera
+Category: Open Risky Ports
+Severity: High
+CVSS: 7.3
+Risk Score: 23
+Ports: 23, 2323, 9527
+Protocols: Telnet
+Keywords: onvif, telnet, debug console
+Source: COMMUNITY_REPORTED
+Published: 2026-08-25
+Updated: 2026-10-01
+Description: Low-cost OEM cameras often ship with Telnet or a debug console on non-standard ports. These services give low-level access and are a common target for IoT botnets. Scope: Generic ONVIF Camera any model.
+Recommendation: Close debug ports, update firmware, or replace the camera.
+Steps:
+- Check the web interface for an option to disable Telnet or debug services.
+- Block the ports at the switch or firewall.
+- Place the camera on an isolated VLAN with no internet access.
+- Replace the camera if the services cannot be disabled.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0160
+Title: ONVIF WS-UsernameToken accepted over plain HTTP
+Vendor: Generic ONVIF Camera
+Models: *
+Firmware: *
+Device Type: camera
+Category: Weak Authentication
+Severity: Medium
+CVSS: 6.5
+Risk Score: 17
+Ports: 80
+Protocols: ONVIF, HTTP
+Keywords: onvif, ws-security, replay
+Source: SIMULATED
+Published: 2026-08-26
+Updated: 2026-10-02
+Description: ONVIF requests use WS-UsernameToken over plain HTTP. Captured tokens may be replayed if the device does not enforce strict timestamp and nonce checks. Scope: Generic ONVIF Camera any model.
+Recommendation: Use HTTPS for ONVIF where supported and keep device time synchronised.
+Steps:
+- Enable HTTPS for ONVIF if the device supports it.
+- Synchronise device time with NTP.
+- Restrict ONVIF access to the VMS.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0161
+Title: FTP service enabled on network video recorder
+Vendor: Generic NVR
+Models: *
+Firmware: *
+Device Type: nvr
+Category: FTP Exposure
+Severity: Medium
+CVSS: 6.5
+Risk Score: 17
+Ports: 21
+Protocols: FTP
+Keywords: nvr, ftp, clear text
+Source: SIMULATED
+Published: 2026-08-27
+Updated: 2026-10-03
+Description: An FTP service is running on the recorder. FTP transfers credentials and recordings in clear text. Scope: Generic NVR any model.
+Recommendation: Disable FTP and use encrypted transfer methods.
+Steps:
+- Disable the FTP service on the NVR.
+- Use HTTPS or SFTP for exporting recordings.
+- Block TCP 21 to the recorder.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0162
+Title: Device information API answers without authentication
+Vendor: Generic NVR
+Models: *
+Firmware: *
+Device Type: nvr
+Category: Insecure API Endpoint
+Severity: High
+CVSS: 7.5
+Risk Score: 24
+Ports: 80, 8080
+Protocols: HTTP
+Keywords: nvr, api, cgi, unauthenticated
+Source: COMMUNITY_REPORTED
+Published: 2026-08-28
+Updated: 2026-10-04
+Description: An HTTP API on the recorder returns device details (model, firmware, channel list) without authentication, helping an attacker pick a matching weakness. Scope: Generic NVR any model.
+Recommendation: Update firmware and restrict the web service to trusted hosts.
+Steps:
+- Update to the latest firmware.
+- Restrict TCP 80/8080 to the management network.
+- Disable unused web services.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0163
+Title: Budget DVR web and client ports reachable from the internet
+Vendor: Generic DVR
+Models: *
+Firmware: *
+Device Type: dvr
+Category: Internet Exposure
+Severity: Critical
+CVSS: 9.3
+Risk Score: 34
+Ports: 80, 8000, 34567
+Protocols: HTTP
+Keywords: dvr, internet, port forward, botnet
+Source: COMMUNITY_REPORTED
+Published: 2026-08-29
+Updated: 2026-10-05
+Description: The DVR web and client ports are forwarded to the internet. Budget DVR firmware is widely targeted by automated botnet scanning once exposed. Scope: Generic DVR any model.
+Recommendation: Remove port forwards and use a VPN for remote viewing.
+Steps:
+- Remove port forwards to the DVR on the router.
+- Disable UPnP on the router and DVR.
+- Use a VPN for remote access.
+- Confirm externally that the ports are closed.
+Note: COMMUNITY_REPORTED demonstration record based on commonly observed weakness patterns. Not independently verified; confirm against the vendor advisory before acting.
+---
+
+ID: SXV-2026-0164
+Title: OEM DVR without vendor firmware updates
+Vendor: Generic DVR
+Models: *
+Firmware: *
+Device Type: dvr
+Category: Unsupported Firmware
+Severity: High
+CVSS: 7.0
+Risk Score: 21
+Ports: 
+Protocols: 
+Keywords: dvr, end of life, no updates
+Source: SIMULATED
+Published: 2026-08-30
+Updated: 2026-10-06
+Description: The recorder is an OEM product with no maintained firmware source. Security weaknesses will not be fixed. Scope: Generic DVR any model.
+Recommendation: Isolate the recorder and plan replacement with a supported product.
+Steps:
+- Place the DVR on an isolated VLAN with no internet access.
+- Block all inbound access except from the viewing workstation.
+- Plan replacement with a supported recorder.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0165
+Title: Configuration backup downloadable over HTTP
+Vendor: Generic IP Camera
+Models: *
+Firmware: *
+Device Type: camera
+Category: Insecure Configuration Backup
+Severity: High
+CVSS: 7.1
+Risk Score: 23
+Ports: 80
+Protocols: HTTP
+Keywords: ip camera, backup, config export
+Source: SIMULATED
+Published: 2026-08-31
+Updated: 2026-10-07
+Description: The camera allows its configuration file to be downloaded over plain HTTP, and the file is not encrypted, revealing network settings and account data. Scope: Generic IP Camera any model.
+Recommendation: Use HTTPS, encrypt exports and restrict access to the web interface.
+Steps:
+- Enable HTTPS and disable HTTP.
+- Encrypt configuration exports where supported.
+- Restrict the web interface to the management network.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0166
+Title: Missing anti-framing header on camera web UI
+Vendor: Generic IP Camera
+Models: *
+Firmware: *
+Device Type: camera
+Category: Missing Security Headers
+Severity: Low
+CVSS: 3.1
+Risk Score: 6
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: ip camera, clickjacking, security headers
+Source: SIMULATED
+Reference: https://owasp.org/www-project-secure-headers/
+Published: 2026-09-01
+Updated: 2026-10-08
+Description: The web interface can be loaded inside a frame on another site because it does not send X-Frame-Options or a CSP frame-ancestors rule. Scope: Generic IP Camera any model.
+Recommendation: Add anti-framing headers through firmware or a reverse proxy.
+Steps:
+- Check for firmware that adds security headers.
+- Otherwise publish the interface through a reverse proxy that sets X-Frame-Options and CSP.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0167
+Title: Cloud P2P service enabled (informational)
+Vendor: Hikvision
+Models: *
+Firmware: *
+Device Type: any
+Category: Internet Exposure
+Severity: Informational
+CVSS: 0.0
+Risk Score: 0
+Ports: 
+Protocols: 
+Keywords: hikvision, hik-connect, cloud
+Source: SIMULATED
+Published: 2026-09-02
+Updated: 2026-10-09
+Description: The cloud P2P service is enabled. This is not a weakness by itself, but it creates an outbound path to a vendor service that should be a deliberate decision. Scope: Hikvision any model.
+Recommendation: Confirm that cloud access is required and approved by site policy.
+Steps:
+- Review whether cloud remote access is required.
+- Disable the P2P service if not approved.
+- Use a strong verification code if it stays enabled.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0168
+Title: Firmware version shown on web login page (informational)
+Vendor: Dahua
+Models: *
+Firmware: *
+Device Type: any
+Category: Web Interface Security
+Severity: Informational
+CVSS: 0.0
+Risk Score: 0
+Ports: 80, 443
+Protocols: HTTP, HTTPS
+Keywords: dahua, banner, version disclosure
+Source: SIMULATED
+Published: 2026-09-03
+Updated: 2026-10-10
+Description: The login page reveals product and version details. This helps inventory but also helps attackers match known weaknesses. Scope: Dahua any model.
+Recommendation: Hide version details where configurable and keep firmware current.
+Steps:
+- Keep firmware up to date so version details reveal nothing useful.
+- Restrict the login page to the management network.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0169
+Title: Telnet service enabled on Bosch device
+Vendor: Bosch
+Models: *
+Firmware: *
+Device Type: any
+Category: Telnet Enabled
+Severity: High
+CVSS: 8.0
+Risk Score: 26
+Ports: 23
+Protocols: Telnet
+Keywords: bosch, telnet
+Source: SIMULATED
+Published: 2026-09-04
+Updated: 2026-10-10
+Description: Telnet is enabled on the device. It provides a clear-text administrative channel that is not needed for normal operation. Scope: Bosch any model.
+Recommendation: Disable Telnet.
+Steps:
+- Disable Telnet in the network services settings.
+- Block TCP 23 at the firewall.
+- Re-scan to confirm.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0170
+Title: SNMP v2c enabled on Avigilon camera
+Vendor: Avigilon
+Models: *
+Firmware: *
+Device Type: camera
+Category: SNMP Exposure
+Severity: Low
+CVSS: 3.7
+Risk Score: 8
+Ports: 161
+Protocols: SNMP
+Keywords: avigilon, snmp
+Source: SIMULATED
+Published: 2026-09-05
+Updated: 2026-10-11
+Description: SNMP v2c is enabled. It exposes read-only device information using a plain-text community string. Scope: Avigilon any model.
+Recommendation: Disable SNMP or use SNMPv3.
+Steps:
+- Disable SNMP if not used for monitoring.
+- Otherwise enable SNMPv3 with authentication and privacy.
+- Allow UDP 161 only from the monitoring server.
+Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---

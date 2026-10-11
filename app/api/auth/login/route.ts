@@ -2,14 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { signToken } from '@/lib/auth/jwt'
-import { loginSchema } from '@/lib/validators/schemas'
+import { loginSchema, byteLength, BCRYPT_MAX_BYTES } from '@/lib/validators/schemas'
 
 // In-memory brute-force tracker keyed by the target account, not client IP.
 // X-Forwarded-For can't be trusted for this: no reverse proxy sits in front
 // of this deployment to strip client-supplied values, so an IP-keyed lockout
 // is trivially bypassed by rotating a spoofed header. Keying on the account
 // being attacked can't be spoofed away the same way.
-const loginAttempts = new Map<string, { attempts: number; lockedUntil: number }>()
+// Kept on globalThis: a module-level Map is wiped whenever Next re-evaluates
+// the route (dev recompiles, idle route disposal), which silently reset the lockout.
+type AttemptTracker = Map<string, { attempts: number; lockedUntil: number }>
+const globalStore = globalThis as typeof globalThis & { __sentrixLoginAttempts?: AttemptTracker }
+const loginAttempts: AttemptTracker = (globalStore.__sentrixLoginAttempts ??= new Map())
 const LOCKOUT_DURATION_MS = 15 * 60 * 1000 // 15 minutes
 
 // A precomputed bcrypt hash with no corresponding real account. Compared
@@ -42,7 +46,12 @@ export async function POST(req: NextRequest) {
   const maxAttempts: number = (anySettings as Array<{ login_attempt_limit: number }> | null)?.[0]?.login_attempt_limit ?? 5
 
   try {
-    const body = await req.json()
+    let body: unknown
+    try {
+      body = await req.json()
+    } catch {
+      return NextResponse.json({ error: 'Invalid request' }, { status: 400 })
+    }
     const parsed = loginSchema.safeParse(body)
     if (!parsed.success) {
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
@@ -65,7 +74,10 @@ export async function POST(req: NextRequest) {
       .eq('email', accountKey)
       .single()
 
-    const isValid = error || !user
+    // bcrypt ignores bytes past 72, so a longer password could "match" a
+    // different one sharing its first 72 bytes. Such a password is never valid.
+    const tooLong = byteLength(password) > BCRYPT_MAX_BYTES
+    const isValid = error || !user || tooLong
       ? await bcrypt.compare(password, DUMMY_HASH).then(() => false)
       : await bcrypt.compare(password, user.password_hash as string)
 

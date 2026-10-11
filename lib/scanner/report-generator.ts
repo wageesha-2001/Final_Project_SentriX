@@ -112,6 +112,16 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
     confidentMatches.filter(m => m.vulnerability.severity === 'Critical').length
   const highVulns = allVulns.filter(v => v.severity === 'high').length +
     confidentMatches.filter(m => m.vulnerability.severity === 'High').length
+  // Critical records matched only at Low confidence: not confirmed, but they
+  // still feed the risk score, so the summary must account for them.
+  const potentialCritical = devices.flatMap(d => (d.community_matches ?? [])
+    .filter(m => m.match_confidence === 'Low' && m.vulnerability.severity === 'Critical')).length
+  const highRated = scan.overall_risk === 'critical' || scan.overall_risk === 'high'
+  const criticalSentence = criticalVulns > 0
+    ? `There ${criticalVulns === 1 ? 'is' : 'are'} <strong style="color:#ff3b5c">${criticalVulns} confirmed critical issue${criticalVulns === 1 ? '' : 's'}</strong> that require${criticalVulns === 1 ? 's' : ''} immediate attention.`
+    : highRated
+      ? `No confirmed critical issues were detected; the ${esc(scan.overall_risk)} rating comes from the combined score of ${highVulns} high-severity issue${highVulns === 1 ? '' : 's'}${potentialCritical > 0 ? ` and ${potentialCritical} potential critical match${potentialCritical === 1 ? '' : 'es'}` : ''} and other findings across ${criticalRiskDevices} critical-risk device${criticalRiskDevices === 1 ? '' : 's'}. Review them in the sections below.`
+      : 'No critical issues were detected.'
   // Key findings: each distinct issue once, with how many devices it affects
   const keyFindings = new Map<string, { severity: 'CRITICAL' | 'HIGH'; title: string; devices: Set<string> }>()
   const addFinding = (severity: 'CRITICAL' | 'HIGH', title: string, deviceId: string) => {
@@ -214,7 +224,8 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
   <div class="stat-card"><div class="stat-value" style="color:#a78bfa">${potentialDevices}</div><div class="stat-label">Potential Issues</div></div>
   <div class="stat-card"><div class="stat-value" style="color:#ffcc00">${vulnerableDevices}</div><div class="stat-label">Vulnerable Devices</div></div>
   <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalRiskDevices}</div><div class="stat-label">Critical Risk Devices</div></div>
-  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalVulns}</div><div class="stat-label">Critical Issues</div></div>
+  <div class="stat-card"><div class="stat-value" style="color:#ff3b5c">${criticalVulns}</div><div class="stat-label">Confirmed Critical Issues</div></div>
+  ${potentialCritical > 0 ? `<div class="stat-card"><div class="stat-value" style="color:#a78bfa">${potentialCritical}</div><div class="stat-label">Potential Critical Matches</div></div>` : ''}
   <div class="stat-card"><div class="stat-value" style="color:#fb923c">${highVulns}</div><div class="stat-label">High Issues</div></div>
 </div>
 
@@ -222,7 +233,7 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
   <div class="section-title">EXECUTIVE SUMMARY</div>
   <div class="summary-box">
     <p>This security audit was conducted on the network range <strong>${esc(scan.network_range)}</strong> on ${formatDate(scan.started_at)}. The scan identified <strong>${devices.length} IP CCTV device${devices.length === 1 ? '' : 's'}</strong> (non-CCTV hosts are excluded from the audit). <strong>${vulnerableDevices} device${vulnerableDevices === 1 ? '' : 's'} (${Math.round(vulnerableDevices / Math.max(devices.length, 1) * 100)}%)</strong> ${vulnerableDevices === 1 ? 'has' : 'have'} confirmed security issues, ${potentialDevices} ${potentialDevices === 1 ? 'has' : 'have'} only potential matches to review, and ${secureDevices} ${secureDevices === 1 ? 'is' : 'are'} secure.</p>
-    <p>The overall network security posture is rated as <strong>${esc(scan.overall_risk.toUpperCase())}</strong>. ${criticalVulns > 0 ? `There ${criticalVulns === 1 ? 'is' : 'are'} <strong style="color:#ff3b5c">${criticalVulns} critical issue${criticalVulns === 1 ? '' : 's'}</strong> that require${criticalVulns === 1 ? 's' : ''} immediate attention.` : 'No critical issues were detected.'}</p>
+    <p>The overall network security posture is rated as <strong>${esc(scan.overall_risk.toUpperCase())}</strong>. ${criticalSentence}</p>
     ${keyFindingsHtml ? `<p><strong>Key Findings:</strong></p><ul>${keyFindingsHtml}</ul>` : ''}
   </div>
 </div>

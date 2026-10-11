@@ -3,9 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "SENTRIX_REAL_SCAN=1 SENTRIX_SCAN_DEBUG=1 next dev",
+    "dev:sim": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "SENTRIX_REAL_SCAN=1 next start",
     "lint": "next lint",
     "test": "jest --runInBand"
   },

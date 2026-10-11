@@ -315,6 +315,8 @@ function seedData(): Record<string, Row[]> {
     cred('Generic', 'default', 'default', 'high'),
   ],
   audit_logs: [],
+  // Token ids revoked by logout (checked by getAuthUser on every request)
+  revoked_tokens: [],
   // Per-scan community vulnerability matches (the records themselves live in data/vulnerabilities.txt)
   device_vulnerability_matches: [],
   vulnerability_checks: [
