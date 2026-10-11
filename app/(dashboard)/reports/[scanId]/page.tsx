@@ -6,6 +6,7 @@ import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner } from '@/components/ui/SimulatedDataBanner'
 import { Report } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { FileText, Download, ExternalLink, SearchX, Lock } from 'lucide-react'
@@ -17,13 +18,14 @@ export default function ReportPage() {
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
   const [generating, setGenerating] = useState(false)
+  const [simulated, setSimulated] = useState(false)
   // Why there is no report: only a completed scan without one can generate it
   const [missing, setMissing] = useState<'scan_not_found' | 'forbidden' | 'not_completed' | 'not_generated'>('not_generated')
 
   useEffect(() => {
     fetch(`/api/reports/${scanId}`).then(async r => {
       const d = await r.json().catch(() => ({}))
-      if (d.data) setReport(d.data)
+      if (d.data) { setReport(d.data); setSimulated(d.scan_mode === 'simulated') }
       else if (r.status === 403) setMissing('forbidden')
       else if (d.reason === 'scan_not_found') setMissing('scan_not_found')
       else if (d.scan_status && d.scan_status !== 'completed') setMissing('not_completed')
@@ -35,7 +37,7 @@ export default function ReportPage() {
     try {
       const res = await fetch(`/api/reports/${scanId}/generate`, { method: 'POST' })
       const d = await res.json()
-      if (res.ok && d.data) { setReport(d.data); toast.success('Report generated!') }
+      if (res.ok && d.data) { setReport(d.data); setSimulated(d.scan_mode === 'simulated'); toast.success('Report generated!') }
       else toast.error(d.error || 'Failed to generate report')
     } catch { toast.error('Error generating report') }
     finally { setGenerating(false) }
@@ -103,6 +105,7 @@ export default function ReportPage() {
         </div>
       }>
       <div className="space-y-4">
+        {simulated && <SimulatedDataBanner context="report" />}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           className="cyber-card p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">

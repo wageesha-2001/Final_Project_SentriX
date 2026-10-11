@@ -217,6 +217,10 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
     <div><span style="color:#718096;font-size:12px">OVERALL RISK</span><br>${getRiskBadgeHtml(scan.overall_risk)}</div>
   </div>
 </div>
+${scan.scan_mode === 'simulated' ? `<div class="simulated-banner" style="margin-bottom:24px;padding:14px 18px;border:2px solid #ffcc00;border-radius:8px;background:#ffcc0015;color:#ffcc00">
+  <strong style="letter-spacing:1px">SIMULATED DATA</strong><br>
+  <span style="color:#a0aec0;font-size:13px">This report was produced in simulation mode. Devices and findings are built-in demo data, not results from a real network audit. Do not use it to make security decisions.</span>
+</div>` : ''}
 
 <div class="stat-grid">
   <div class="stat-card"><div class="stat-value" style="color:#00d4ff">${devices.length}</div><div class="stat-label">CCTV Devices</div></div>

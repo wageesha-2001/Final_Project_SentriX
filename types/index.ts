@@ -24,6 +24,8 @@ export interface Scan {
   started_at: string;
   completed_at?: string;
   progress?: number;
+  /** Discovery engine used; absent on scans created before it was recorded. */
+  scan_mode?: 'real' | 'simulated';
 }
 
 export type DeviceType = 'camera' | 'nvr' | 'dvr' | 'router' | 'unknown';
@@ -58,6 +60,8 @@ export interface DeviceListItem extends Device {
   findings_count: number;
   community_match_count: number;
   security_status: SecurityStatus;
+  /** Found by a simulation-mode scan (built-in demo device). */
+  simulated?: boolean;
 }
 
 export type VulnerabilitySeverity = 'low' | 'medium' | 'high' | 'critical';

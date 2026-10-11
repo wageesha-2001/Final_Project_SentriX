@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { StatCard } from '@/components/ui/StatCard'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
+import { SimulatedDataBanner, SimulatedTag } from '@/components/ui/SimulatedDataBanner'
 import { formatDate, formatDuration } from '@/lib/utils'
 import { Cpu, Shield, AlertTriangle, Zap, Search, ArrowRight, Activity } from 'lucide-react'
 import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer, Legend } from 'recharts'
@@ -24,6 +25,7 @@ interface DashboardData {
   latest_scan: Scan | null
   recent_scans: Scan[]
   risk_distribution: { name: string; value: number; color: string }[]
+  has_simulated_data: boolean
 }
 
 export default function DashboardPage() {
@@ -50,6 +52,7 @@ export default function DashboardPage() {
         </div>
       ) : data ? (
         <div className="space-y-6">
+          {data.has_simulated_data && <SimulatedDataBanner context="dashboard" />}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
             <StatCard title="CCTV Devices" value={data.total_devices} icon={Cpu} color="accent"
               subtitle={`${data.camera_devices} cameras • ${data.nvr_devices} NVR/DVR`} delay={0} />
@@ -107,6 +110,7 @@ export default function DashboardPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-3">
+                        {scan.scan_mode === 'simulated' && <SimulatedTag />}
                         {scan.status === 'completed' && <RiskBadge level={scan.overall_risk} size="sm" />}
                         <span className={`text-xs font-medium ${statusColors[scan.status] || 'text-cyber-muted'}`}>
                           {scan.status.toUpperCase()}

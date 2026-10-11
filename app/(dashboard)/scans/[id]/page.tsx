@@ -8,6 +8,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner } from '@/components/ui/SimulatedDataBanner'
 import { Scan, Device, Vulnerability, EnrichedMatch, SecurityStatus } from '@/types'
 import { getSecurityStatus } from '@/lib/risk/calculator'
 import { MatchCard, SEVERITY_CLASS } from '@/components/vuln-db/MatchCard'
@@ -99,6 +100,7 @@ export default function ScanResultsPage() {
   return (
     <DashboardLayout title="Scan Results" subtitle={scan.scan_name}>
       <div className="space-y-6">
+        {scan.scan_mode === 'simulated' && <SimulatedDataBanner />}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="cyber-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>

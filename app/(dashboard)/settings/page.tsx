@@ -132,7 +132,8 @@ export default function SettingsPage() {
   useEffect(() => {
     Promise.all([
       fetch('/api/settings').then(r => r.json()),
-      fetch('/api/default-credentials').then(r => r.json()),
+      // Admin only: technicians get 403 and the section stays hidden
+      fetch('/api/default-credentials').then(r => r.ok ? r.json() : { data: [] }),
       fetch('/api/vulnerability-checks').then(r => r.json()),
       fetch('/api/auth/me').then(r => r.json()),
     ]).then(([settings, creds, checks, me]) => {
@@ -286,6 +287,7 @@ export default function SettingsPage() {
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="cyber-card p-6">
             <h2 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-4 flex items-center gap-2">
               <Shield className="w-4 h-4 text-cyber-accent" /> Scan Settings
+              {!isAdmin && <span className="text-amber-400 normal-case tracking-normal font-normal">(Set by an admin — read only)</span>}
             </h2>
             <div className="space-y-4">
               <div className="flex items-center justify-between p-4 bg-cyber-surface rounded-lg">
@@ -293,7 +295,8 @@ export default function SettingsPage() {
                   <p className="font-medium text-white text-sm">Safe Scan Mode</p>
                   <p className="text-xs text-cyber-text-muted mt-0.5">Disables credential testing checks for safer auditing</p>
                 </div>
-                <button type="button" onClick={() => setValue('safe_scan_mode', !safeScanMode)}>
+                <button type="button" disabled={!isAdmin} onClick={() => setValue('safe_scan_mode', !safeScanMode)}
+                  className="disabled:cursor-not-allowed disabled:opacity-60">
                   {safeScanMode
                     ? <ToggleRight className="w-8 h-8 text-cyber-green" />
                     : <ToggleLeft className="w-8 h-8 text-cyber-muted" />}
@@ -304,7 +307,7 @@ export default function SettingsPage() {
                   <label className="block text-xs font-semibold text-cyber-text-muted uppercase tracking-wider mb-2">
                     Scan Timeout (seconds)
                   </label>
-                  <input {...register('scan_timeout', { valueAsNumber: true })} type="number" min="60" max="3600"
+                  <input {...register('scan_timeout', { valueAsNumber: true })} type="number" min="60" max="3600" readOnly={!isAdmin}
                     className="cyber-input w-full px-4 py-2.5 rounded-lg text-sm" />
                   {errors.scan_timeout && <p className="text-cyber-red text-xs mt-1">{errors.scan_timeout.message}</p>}
                 </div>
@@ -312,7 +315,7 @@ export default function SettingsPage() {
                   <label className="block text-xs font-semibold text-cyber-text-muted uppercase tracking-wider mb-2">
                     Login Attempt Limit
                   </label>
-                  <input {...register('login_attempt_limit', { valueAsNumber: true })} type="number" min="3" max="20"
+                  <input {...register('login_attempt_limit', { valueAsNumber: true })} type="number" min="3" max="20" readOnly={!isAdmin}
                     className="cyber-input w-full px-4 py-2.5 rounded-lg text-sm" />
                   {errors.login_attempt_limit && <p className="text-cyber-red text-xs mt-1">{errors.login_attempt_limit.message}</p>}
                 </div>
@@ -320,14 +323,14 @@ export default function SettingsPage() {
             </div>
           </motion.div>
 
-          <div className="flex justify-end">
+          {isAdmin && <div className="flex justify-end">
             <button type="submit" disabled={saving}
               className="cyber-btn-primary px-6 py-2.5 rounded-lg text-sm font-bold flex items-center gap-2">
               {saving
                 ? <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />Saving...</>
                 : <><Settings className="w-4 h-4" />Save Settings</>}
             </button>
-          </div>
+          </div>}
         </form>
 
         {/* ── Vulnerability Checks Module ────────────────────────────────── */}
@@ -547,8 +550,8 @@ export default function SettingsPage() {
           </div>
         </motion.div>
 
-        {/* ── Default Credentials Database ──────────────────────────────── */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
+        {/* ── Default Credentials Database (admin only) ─────────────────── */}
+        {isAdmin && <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}
           className="cyber-card p-6">
           <h2 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-4">
             Default Credentials Database ({filteredCreds.length})
@@ -634,7 +637,7 @@ export default function SettingsPage() {
               </button>
             </div>
           )}
-        </motion.div>
+        </motion.div>}
       </div>
 
       {/* Recommendation modal */}

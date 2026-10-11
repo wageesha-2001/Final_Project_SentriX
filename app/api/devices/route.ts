@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
 
   try {
     if (scanId) {
-      const { data: scan } = await supabase.from('scans').select('user_id').eq('id', scanId).single()
+      const { data: scan } = await supabase.from('scans').select('*').eq('id', scanId).single()
       if (!scan) return NextResponse.json({ error: 'Scan not found' }, { status: 404 })
       if (user!.role !== 'admin' && scan.user_id !== user!.sub) {
         return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
@@ -24,7 +24,8 @@ export async function GET(req: NextRequest) {
       const { data, error } = await supabase.from('devices').select('*').eq('scan_id', scanId)
         .order('risk_score', { ascending: false })
       if (error) throw error
-      return NextResponse.json({ data: await withSecuritySummary(supabase, data || []) })
+      const simulated = scan.scan_mode === 'simulated'
+      return NextResponse.json({ data: (await withSecuritySummary(supabase, data || [])).map(d => ({ ...d, simulated })) })
     }
 
     const scans = await getVisibleCompletedScans(supabase, user!)

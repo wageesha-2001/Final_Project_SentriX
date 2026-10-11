@@ -39,6 +39,8 @@ export async function GET(req: NextRequest) {
       latest_scan: (scans || [])[0] || null,
       recent_scans: (scans || []).slice(0, 5),
       risk_distribution: riskDistribution,
+      // True when any counted device came from a simulation-mode scan
+      has_simulated_data: inventory.some(d => d.simulated),
     },
   })
 }

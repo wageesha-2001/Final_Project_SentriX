@@ -41,5 +41,5 @@ export async function POST(req: NextRequest, { params }: { params: { scanId: str
     action: 'report_generated',
     details: { scan_id: params.scanId, scan_name: scan.scan_name },
   })
-  return NextResponse.json({ data: report }, { status: 201 })
+  return NextResponse.json({ data: report, scan_mode: scan.scan_mode ?? null }, { status: 201 })
 }

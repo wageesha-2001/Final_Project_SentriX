@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { signToken } from '@/lib/auth/jwt'
 import { loginSchema, byteLength, BCRYPT_MAX_BYTES } from '@/lib/validators/schemas'
+import { getGlobalSettings } from '@/lib/settings/global'
 
 // In-memory brute-force tracker keyed by the target account, not client IP.
 // X-Forwarded-For can't be trusted for this: no reverse proxy sits in front
@@ -39,11 +40,7 @@ export async function POST(req: NextRequest) {
   const now = Date.now()
 
   const supabase = createServerSupabase()
-  const { data: anySettings } = await supabase
-    .from('settings')
-    .select('login_attempt_limit')
-    .limit(1)
-  const maxAttempts: number = (anySettings as Array<{ login_attempt_limit: number }> | null)?.[0]?.login_attempt_limit ?? 5
+  const maxAttempts = (await getGlobalSettings(supabase)).login_attempt_limit
 
   try {
     let body: unknown

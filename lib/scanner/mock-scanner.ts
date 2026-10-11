@@ -177,6 +177,11 @@ const NON_CCTV_HOSTS: (DiscoveredHost & { host: number })[] = [
     open_ports: [{ port: 8001, service: 'HTTP', protocol: 'tcp' }, { port: 8002, service: 'HTTPS', protocol: 'tcp' }] },
 ]
 
+/** Which discovery engine scans use: live probing, or the built-in demo hosts above. */
+export function getScannerMode(): 'real' | 'simulated' {
+  return process.env.SENTRIX_REAL_SCAN === '1' ? 'real' : 'simulated'
+}
+
 async function getEnabledCheckSlugs(supabase: ReturnType<typeof createServerSupabase>): Promise<Set<string>> {
   const { data } = await supabase
     .from('vulnerability_checks')
@@ -223,7 +228,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
   //  - REAL (SENTRIX_REAL_SCAN=1): non-destructive probing of the live network.
   //  - SIMULATION (default): a fixed set of demo hosts, deterministic for the POC.
   // Both feed the SAME weighted classifier and the SAME downstream analysis.
-  const realScan = process.env.SENTRIX_REAL_SCAN === '1'
+  const realScan = getScannerMode() === 'real'
   const isStoppedNow = async () =>
     (await supabase.from('scans').select('status').eq('id', scanId).single()).data?.status === 'stopped'
   const filterChecks = (checks: string[]) => {

@@ -3705,7 +3705,7 @@ Note: SIMULATED record created for academic demonstration. It is not a confirmed
 ID: SXV-2026-0147
 Title: Configuration export not encrypted on Wisenet cameras
 Vendor: Hanwha
-Models: XNV-*, XND-*
+Models: XND-*, XNO-*
 Firmware: *
 Device Type: camera
 Category: Insecure Configuration Backup
@@ -3718,7 +3718,7 @@ Keywords: hanwha, wisenet, backup, config export
 Source: SIMULATED
 Published: 2026-08-13
 Updated: 2026-09-14
-Description: Exported configuration files are not encrypted. A copy left on a shared drive or laptop reveals network settings and account details for the camera. Scope: Hanwha XNV-*, XND-*.
+Description: Exported configuration files are not encrypted. A copy left on a shared drive or laptop reveals network settings and account details for the camera. Scope: Hanwha XND-*, XNO-*.
 Recommendation: Encrypt configuration exports and store them securely.
 Steps:
 - Use the encrypted export option where available.
@@ -3755,7 +3755,7 @@ Note: COMMUNITY_REPORTED demonstration record based on commonly observed weaknes
 ID: SXV-2026-0149
 Title: RTSP streams reachable without authentication on Bosch cameras
 Vendor: Bosch
-Models: FLEXIDOME*, DINION*
+Models: DINION*, AUTODOME*
 Firmware: *
 Device Type: camera
 Category: RTSP Exposure
@@ -3768,7 +3768,7 @@ Keywords: bosch, rtsp, stream
 Source: COMMUNITY_REPORTED
 Published: 2026-08-15
 Updated: 2026-09-16
-Description: Live video can be requested over RTSP without credentials when the service password is left empty, exposing the camera view to anyone on the network. Scope: Bosch FLEXIDOME*, DINION*.
+Description: Live video can be requested over RTSP without credentials when the service password is left empty, exposing the camera view to anyone on the network. Scope: Bosch DINION*, AUTODOME*.
 Recommendation: Set passwords for all user levels and restrict RTSP access.
 Steps:
 - Set passwords for the service, user and live levels.

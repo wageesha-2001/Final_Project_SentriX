@@ -11,6 +11,7 @@ import { Scan } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { Shield, StopCircle, CheckCircle, Cpu, AlertTriangle, SearchX, Lock } from 'lucide-react'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner } from '@/components/ui/SimulatedDataBanner'
 import toast from 'react-hot-toast'
 
 export default function ScanProgressPage() {
@@ -98,6 +99,7 @@ export default function ScanProgressPage() {
   return (
     <DashboardLayout title="Scan Progress" subtitle="Real-time security audit status">
       <div className="max-w-2xl mx-auto space-y-6">
+        {scan?.scan_mode === 'simulated' && <SimulatedDataBanner />}
         {unavailable && (
           <EmptyState
             icon={unavailable === 'not_found' ? SearchX : Lock}

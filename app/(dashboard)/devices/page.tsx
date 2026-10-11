@@ -8,6 +8,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner, SimulatedTag } from '@/components/ui/SimulatedDataBanner'
 import { DeviceListItem, SecurityStatus } from '@/types'
 import { formatDate } from '@/lib/utils'
 import { Cpu, Search, Filter, ExternalLink } from 'lucide-react'
@@ -54,6 +55,7 @@ function DevicesContent() {
     <DashboardLayout title="Devices"
       subtitle={scanFilter ? 'CCTV devices found by this scan' : 'CCTV device inventory — each device once, from its latest scan'}>
       <div className="space-y-4">
+        {!loading && devices.some(d => d.simulated) && <SimulatedDataBanner context={scanFilter ? 'scan' : 'dashboard'} />}
         {!loading && devices.length > 0 && (
           <div className="cyber-card p-4 flex flex-wrap gap-x-6 gap-y-2 text-xs">
             <span className="text-cyber-muted">Identified: <strong className="text-white">{devices.length}</strong> devices</span>
@@ -112,7 +114,7 @@ function DevicesContent() {
                        <Cpu className="w-5 h-5 text-cyber-accent" />
                      </div>
                      <div>
-                       <p className="font-semibold text-white text-sm">{device.vendor}</p>
+                       <p className="font-semibold text-white text-sm flex items-center gap-2">{device.vendor}{device.simulated && <SimulatedTag />}</p>
                        <p className="text-xs text-cyber-muted">{device.model}</p>
                      </div>
                    </div>

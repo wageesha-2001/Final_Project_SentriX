@@ -57,6 +57,8 @@ export async function getDeviceInventory(db: Db, completedScans: Row[]): Promise
     const current = latest.get(key)
     if (!current || scanOrder.get(d.scan_id as string)! < scanOrder.get(current.scan_id as string)!) latest.set(key, d)
   }
-  const list = await withSecuritySummary(db, Array.from(latest.values()))
+  const simulatedScans = new Set(completedScans.filter(s => s.scan_mode === 'simulated').map(s => s.id as string))
+  const list = (await withSecuritySummary(db, Array.from(latest.values())))
+    .map(d => ({ ...d, simulated: simulatedScans.has(d.scan_id) }))
   return list.sort((a, b) => b.risk_score - a.risk_score || a.ip_address.localeCompare(b.ip_address, undefined, { numeric: true }))
 }

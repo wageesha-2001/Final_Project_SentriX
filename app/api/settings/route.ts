@@ -2,30 +2,22 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireAuth } from '@/lib/auth/middleware'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { settingsSchema } from '@/lib/validators/schemas'
+import { getGlobalSettings } from '@/lib/settings/global'
 
+// Scanner settings are global: every user reads the same values, only admins change them.
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
   const authError = requireAuth(user)
   if (authError) return authError
   const supabase = createServerSupabase()
-  const { data, error } = await supabase.from('settings').select('*').eq('user_id', user!.sub).single()
-  if (error || !data) {
-    const defaults = {
-      user_id: user!.sub,
-      safe_scan_mode: true,
-      scan_timeout: 300,
-      login_attempt_limit: 5,
-    }
-    const { data: created } = await supabase.from('settings').insert(defaults).select().single()
-    return NextResponse.json({ data: created || defaults })
-  }
-  return NextResponse.json({ data })
+  return NextResponse.json({ data: await getGlobalSettings(supabase) })
 }
 
 export async function PUT(req: NextRequest) {
   const user = await getAuthUser(req)
   const authError = requireAuth(user)
   if (authError) return authError
+  if (user!.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
   try {
     const body = await req.json()
     const parsed = settingsSchema.safeParse(body)
@@ -33,7 +25,7 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: parsed.error.errors[0].message }, { status: 400 })
     }
     const supabase = createServerSupabase()
-    const { data: previous } = await supabase.from('settings').select('*').eq('user_id', user!.sub).single()
+    const previous = await getGlobalSettings(supabase)
     const { data, error } = await supabase
       .from('settings')
       .upsert({ ...parsed.data, user_id: user!.sub, updated_at: new Date().toISOString() }, { onConflict: 'user_id' })
@@ -46,7 +38,7 @@ export async function PUT(req: NextRequest) {
     // Record what changed (e.g. safe scan mode turned off) like other admin actions
     const changes: Record<string, { from: unknown; to: unknown }> = {}
     for (const [key, to] of Object.entries(parsed.data)) {
-      const from = (previous as Record<string, unknown> | null)?.[key]
+      const from = (previous as unknown as Record<string, unknown>)[key]
       if (from !== to) changes[key] = { from: from ?? null, to }
     }
     if (Object.keys(changes).length > 0) {

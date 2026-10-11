@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS scans (
   overall_risk TEXT DEFAULT 'secure' CHECK (overall_risk IN ('secure', 'low', 'medium', 'high', 'critical')),
   started_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
-  progress INT DEFAULT 0 CHECK (progress >= 0 AND progress <= 100)
+  progress INT DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+  scan_mode TEXT CHECK (scan_mode IN ('real', 'simulated'))
 );
 
 -- Devices table
