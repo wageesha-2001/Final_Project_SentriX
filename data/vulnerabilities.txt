@@ -10,7 +10,13 @@
 #  RULES
 #   - Lines starting with # are comments and are ignored.
 #   - Lists (Models, Firmware, Ports, Protocols, Keywords) are comma separated.
-#     Use * for "any model" / "any firmware".   Firmware may use wildcards: V5.5.*
+#     Use * for "any firmware".   Firmware may use wildcards: V5.5.*
+#   - MATCHING RULE: a scanned device is flagged only when its EXACT model is
+#     listed in Models AND its firmware is consistent with Firmware (* = every
+#     version). Records with Models * or a series pattern (e.g. DS-2CD2*) never
+#     match — list each affected model by its full name. If a device's firmware
+#     is unknown and the record names a firmware range, the match is reported as
+#     UNVERIFIED (potential), never as a confirmed vulnerability.
 #   - Severity: Critical | High | Medium | Low | Informational
 #       Risk Score must fit: Critical 30-40, High 20-29, Medium 10-19, Low 1-9, Informational 0
 #   - Source:  SIMULATED | COMMUNITY_REPORTED | VENDOR_ADVISORY | CVE
@@ -4302,4 +4308,54 @@ Steps:
 - Otherwise enable SNMPv3 with authentication and privacy.
 - Allow UDP 161 only from the monitoring server.
 Note: SIMULATED record created for academic demonstration. It is not a confirmed vulnerability in the named product.
+---
+
+ID: SXV-2026-0171
+Title: Outdated Firmware on DS-7616NI-Q2 (V5.2 branch)
+Vendor: Hikvision
+Models: DS-7616NI-Q2
+Firmware: V5.2.*
+Device Type: nvr
+Category: Outdated Firmware
+Severity: High
+CVSS: 7.5
+Risk Score: 25
+Ports: 80, 8000
+Protocols: HTTP, ISAPI
+Keywords: hikvision, nvr, outdated firmware
+Source: COMMUNITY_REPORTED
+Published: 2026-10-12
+Updated: 2026-10-12
+Description: The detected firmware branch (V5.2.0 build 151225) is several years old and is missing security fixes published in later maintained releases, leaving the recorder exposed to known issues addressed upstream. Scope: Hikvision DS-7616NI-Q2. Affected firmware: V5.2.*.
+Recommendation: Update the recorder to the latest stable firmware released by the vendor for this model.
+Steps:
+- Confirm the current firmware version in the device System Information page.
+- Download the latest maintained firmware for DS-7616NI-Q2 from the vendor portal.
+- Apply the update during a maintenance window and verify the version afterwards.
+Note: COMMUNITY_REPORTED record. Verify against the official vendor advisory before remediation.
+---
+
+ID: SXV-2026-0172
+Title: Outdated Firmware on DS-2CD2042WD-I (V5.7 branch)
+Vendor: Hikvision
+Models: DS-2CD2042WD-I
+Firmware: V5.7.*
+Device Type: camera
+Category: Outdated Firmware
+Severity: High
+CVSS: 7.5
+Risk Score: 25
+Ports: 80, 8000
+Protocols: HTTP, ISAPI
+Keywords: hikvision, camera, outdated firmware
+Source: COMMUNITY_REPORTED
+Published: 2026-10-12
+Updated: 2026-10-12
+Description: The detected firmware branch (V5.7.3 build 210721) is missing security fixes published in later maintained releases, leaving the camera exposed to known issues addressed upstream. Scope: Hikvision DS-2CD2042WD-I. Affected firmware: V5.7.*.
+Recommendation: Update the camera to the latest stable firmware released by the vendor for this model.
+Steps:
+- Confirm the current firmware version in the device System Information page.
+- Download the latest maintained firmware for DS-2CD2042WD-I from the vendor portal.
+- Apply the update during a maintenance window and verify the version afterwards.
+Note: COMMUNITY_REPORTED record. Verify against the official vendor advisory before remediation.
 ---

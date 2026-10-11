@@ -4,8 +4,12 @@
  * not multiply the device counts on the dashboard or the Devices page.
  */
 import { createServerSupabase } from '@/lib/supabase/server'
-import { getSecurityStatus } from '@/lib/risk/calculator'
-import { DeviceListItem, MatchConfidence } from '@/types'
+import {
+  getSecurityStatus, calculateTrustScore, overallToSecurityStatus,
+} from '@/lib/risk/calculator'
+import {
+  DeviceListItem, MatchConfidence, KnownVulnerabilityStatus, AuthenticationStatus, OverallSecurityStatus,
+} from '@/types'
 
 type Db = ReturnType<typeof createServerSupabase>
 type Row = Record<string, unknown>
@@ -16,22 +20,47 @@ export function deviceKey(d: { mac_address?: unknown; ip_address?: unknown }): s
   return mac ? `mac:${mac}` : `ip:${String(d.ip_address ?? '')}`
 }
 
-/** Attach per-device finding / match counts and the derived security status. */
+/**
+ * Attach per-device finding / match counts and the separated security statuses.
+ * Prefers the statuses persisted at scan time; falls back to deriving them from
+ * stored rows for devices scanned before those columns existed.
+ */
 export async function withSecuritySummary(db: Db, devices: Row[]): Promise<DeviceListItem[]> {
   const ids = devices.map(d => d.id as string)
   if (ids.length === 0) return []
   const [{ data: vulns }, { data: matches }] = await Promise.all([
-    db.from('vulnerabilities').select('device_id').in('device_id', ids),
+    db.from('vulnerabilities').select('device_id, informational').in('device_id', ids),
     db.from('device_vulnerability_matches').select('device_id, match_confidence').in('device_id', ids),
   ])
   return devices.map(d => {
-    const findings = (vulns || []).filter((v: Row) => v.device_id === d.id).length
+    const deviceVulns = (vulns || []).filter((v: Row) => v.device_id === d.id)
+    const confirmedFindings = deviceVulns.filter((v: Row) => v.informational !== true).length
+    const informational = deviceVulns.filter((v: Row) => v.informational === true).length
     const deviceMatches = (matches || []).filter((m: Row) => m.device_id === d.id) as { match_confidence: MatchConfidence }[]
+    const confirmedMatches = deviceMatches.filter(m => m.match_confidence === 'High')
+
+    // Prefer persisted statuses; derive for legacy rows.
+    const known = (d.known_vulnerability_status as KnownVulnerabilityStatus | undefined)
+      ?? (confirmedMatches.length > 0 ? 'MATCHED' : deviceMatches.length > 0 ? 'UNVERIFIED' : 'NO_MATCH')
+    const auth = (d.authentication_status as AuthenticationStatus | undefined) ?? 'NOT_TESTED'
+    const overall = (d.overall_security_status as OverallSecurityStatus | undefined)
+      ?? (confirmedFindings > 0 || confirmedMatches.length > 0 ? 'VULNERABLE'
+        : deviceMatches.length > 0 ? 'NOT_VERIFIED' : 'HEALTHY')
+    const risk = Number(d.risk_score ?? 0)
+
     return {
       ...(d as unknown as DeviceListItem),
-      findings_count: findings,
+      findings_count: confirmedFindings + confirmedMatches.length,
       community_match_count: deviceMatches.length,
-      security_status: getSecurityStatus(findings, deviceMatches),
+      known_vulnerability_count: confirmedMatches.length,
+      informational_count: informational,
+      known_vulnerability_status: known,
+      authentication_status: auth,
+      overall_security_status: overall,
+      security_status: (d.overall_security_status
+        ? overallToSecurityStatus(overall)
+        : getSecurityStatus(confirmedFindings, deviceMatches)),
+      trust_score: Number(d.trust_score ?? calculateTrustScore(risk)),
     }
   })
 }

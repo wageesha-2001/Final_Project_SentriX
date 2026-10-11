@@ -1,4 +1,7 @@
-import { Vulnerability, RiskLevel, MatchConfidence, SecurityStatus } from '@/types'
+import {
+  Vulnerability, RiskLevel, MatchConfidence, SecurityStatus,
+  KnownVulnerabilityStatus, AuthenticationStatus, OverallSecurityStatus,
+} from '@/types'
 
 export interface VulnDefinition {
   title: string
@@ -195,6 +198,58 @@ export function getSecurityStatus(
 
 export function calculateTrustScore(riskScore: number): number {
   return 100 - Math.min(Math.max(riskScore, 0), 100)
+}
+
+// ─── Confirmed-finding risk & separated classification ───────────────────────
+
+/** Risk contribution of a confirmed default-credential finding. */
+export const CREDENTIAL_FINDING = {
+  title: 'Default Credentials Confirmed',
+  description: 'An authorized verification confirmed the device accepts factory-default credentials.',
+  severity: 'critical' as const,
+  score: 35,
+  recommendation: 'Change the default credentials immediately and set a strong, unique password.',
+}
+
+/**
+ * Device risk from CONFIRMED findings only. Confirmed vulnerabilities.txt
+ * matches (risk_score_added already confidence-scaled) plus a confirmed
+ * default-credential finding. Unverified/informational items contribute 0.
+ * The same credential weakness is not double-counted. Capped at 100.
+ */
+export function calculateDeviceRisk(
+  confirmedMatches: { risk_score_added: number }[],
+  credentialConfirmed: boolean,
+): number {
+  const fromMatches = confirmedMatches.reduce((sum, m) => sum + m.risk_score_added, 0)
+  const fromCreds = credentialConfirmed ? CREDENTIAL_FINDING.score : 0
+  return Math.min(fromMatches + fromCreds, 100)
+}
+
+/**
+ * Overall per-device status from the two independent assessments.
+ *   VULNERABLE    — a confirmed file match OR confirmed default credentials.
+ *   NOT_VERIFIED  — no confirmed finding, but an essential check could not be
+ *                   completed (unverified firmware match, auth error, or an
+ *                   auth test required by policy that did not run).
+ *   HEALTHY       — no confirmed finding and all essential checks completed.
+ */
+export function getOverallSecurityStatus(args: {
+  knownStatus: KnownVulnerabilityStatus
+  authStatus: AuthenticationStatus
+  essentialChecksComplete: boolean
+}): OverallSecurityStatus {
+  const { knownStatus, authStatus, essentialChecksComplete } = args
+  if (knownStatus === 'MATCHED' || authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS') return 'VULNERABLE'
+  if (knownStatus === 'UNVERIFIED' || authStatus === 'AUTHENTICATION_ERROR' || !essentialChecksComplete) {
+    return 'NOT_VERIFIED'
+  }
+  return 'HEALTHY'
+}
+
+/** Legacy tri-state used by the existing device/dashboard UI. */
+export function overallToSecurityStatus(overall: OverallSecurityStatus): SecurityStatus {
+  return overall === 'VULNERABLE' ? 'vulnerable' : overall === 'NOT_VERIFIED' ? 'potential' : 'secure'
 }
 
 export function getRiskLevel(score: number): RiskLevel {

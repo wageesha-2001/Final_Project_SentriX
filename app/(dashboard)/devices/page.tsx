@@ -15,8 +15,8 @@ import { Cpu, Search, Filter, ExternalLink } from 'lucide-react'
 
 const SECURITY_STATUS: Record<SecurityStatus, { label: string; className: string }> = {
   vulnerable: { label: 'Vulnerable', className: 'text-cyber-red border-cyber-red/30 bg-cyber-red/10' },
-  potential: { label: 'Potential issues', className: 'text-cyber-yellow border-cyber-yellow/30 bg-cyber-yellow/10' },
-  secure: { label: 'Secure', className: 'text-cyber-green border-cyber-green/30 bg-cyber-green/10' },
+  potential: { label: 'Not Verified', className: 'text-cyber-yellow border-cyber-yellow/30 bg-cyber-yellow/10' },
+  secure: { label: 'Healthy', className: 'text-cyber-green border-cyber-green/30 bg-cyber-green/10' },
 }
 
 const DEVICE_TYPE_LABEL: Record<string, string> = { camera: 'IP Camera', nvr: 'NVR', dvr: 'DVR', router: 'Router', unknown: 'Unknown' }
@@ -62,8 +62,8 @@ function DevicesContent() {
             <span className="text-cyber-muted">IP Cameras: <strong className="text-white">{count(d => d.device_type === 'camera')}</strong></span>
             <span className="text-cyber-muted">NVRs: <strong className="text-white">{count(d => d.device_type === 'nvr')}</strong></span>
             <span className="text-cyber-muted">Vulnerable: <strong className="text-cyber-red">{count(d => d.security_status === 'vulnerable')}</strong></span>
-            <span className="text-cyber-muted">Potential issues: <strong className="text-cyber-yellow">{count(d => d.security_status === 'potential')}</strong></span>
-            <span className="text-cyber-muted">Secure: <strong className="text-cyber-green">{count(d => d.security_status === 'secure')}</strong></span>
+            <span className="text-cyber-muted">Not Verified: <strong className="text-cyber-yellow">{count(d => d.security_status === 'potential')}</strong></span>
+            <span className="text-cyber-muted">Healthy: <strong className="text-cyber-green">{count(d => d.security_status === 'secure')}</strong></span>
           </div>
         )}
         <div className="flex flex-wrap gap-3">
@@ -123,6 +123,7 @@ function DevicesContent() {
                  <div className="space-y-1.5 text-xs mb-3">
                    <div className="flex justify-between"><span className="text-cyber-muted">IP:</span><span className="text-white font-mono">{device.ip_address}</span></div>
                    <div className="flex justify-between"><span className="text-cyber-muted">Type:</span><span className="text-white">{DEVICE_TYPE_LABEL[device.device_type] ?? device.device_type}</span></div>
+                   <div className="flex justify-between"><span className="text-cyber-muted">Firmware:</span><span className="text-white font-mono">{device.firmware_version || 'Unknown'}</span></div>
                    <div className="flex justify-between items-center"><span className="text-cyber-muted">Status:</span>
                      <span className="flex items-center gap-2">
                        <span className="flex items-center gap-1 text-white"><span className="w-1.5 h-1.5 rounded-full bg-cyber-green" />{onlineLabel(device.status)}</span>
@@ -133,8 +134,9 @@ function DevicesContent() {
                        )}
                      </span>
                    </div>
-                   <div className="flex justify-between"><span className="text-cyber-muted">Findings:</span>
-                     <span className="text-white">{device.findings_count} check{device.findings_count === 1 ? '' : 's'} • {device.community_match_count} DB match{device.community_match_count === 1 ? '' : 'es'}</span></div>
+                   <div className="flex justify-between"><span className="text-cyber-muted">Known vuln:</span>
+                     <span className="text-white">{device.known_vulnerability_count} confirmed{device.informational_count ? ` • ${device.informational_count} info` : ''}</span></div>
+                   <div className="flex justify-between"><span className="text-cyber-muted">Trust:</span><span className="text-white font-mono">{device.trust_score}/100</span></div>
                    <div className="flex justify-between"><span className="text-cyber-muted">Ports:</span><span className="text-white font-mono">{device.open_ports.map(p => p.port).join(', ')}</span></div>
                    <div className="flex justify-between"><span className="text-cyber-muted">Scanned:</span><span className="text-white">{formatDate(device.created_at)}</span></div>
                  </div>

@@ -53,12 +53,13 @@ test('repeated scans with unchanged devices and settings give identical results'
   }
 }, 120000)
 
-test('only the Safe Scan Mode setting changes the default-credential finding', async () => {
+test('findings come only from vulnerabilities.txt, and no live credential check runs in simulation', async () => {
   const safe = await scanSnapshot(true)
   const full = await scanSnapshot(false)
-  const credTitle = (d: { findings: string[] }) => d.findings.filter(f => /credential/i.test(f))
+  // No device accepts default credentials in a simulation (no real login is attempted).
+  const credTitle = (d: { findings: string[] }) => d.findings.filter(f => /credentials confirmed/i.test(f))
   expect(safe.devices.flatMap(credTitle)).toHaveLength(0)
-  expect(full.devices.flatMap(credTitle).length).toBeGreaterThan(0)
-  // Same devices are identified either way
-  expect(full.devices.map(d => d.ip)).toEqual(safe.devices.map(d => d.ip))
+  expect(full.devices.flatMap(credTitle)).toHaveLength(0)
+  // Safe Scan Mode no longer changes simulation results (findings are file-driven).
+  expect(full.devices).toEqual(safe.devices)
 }, 120000)

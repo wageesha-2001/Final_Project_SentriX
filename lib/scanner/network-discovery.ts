@@ -131,6 +131,32 @@ export function probeHttp(ip: string, port: number, tls: boolean, path = '/', ti
   })
 }
 
+/**
+ * AuthProbe implementation for the authorized credential check: a single GET
+ * with an optional Authorization header, returning the status and any
+ * WWW-Authenticate challenge. No body is inspected (and none is logged).
+ */
+export function httpAuthProbe(opts: {
+  ip: string; port: number; tls: boolean; path: string; authorization?: string; timeoutMs: number
+}): Promise<{ status: number; wwwAuthenticate?: string } | null> {
+  return new Promise(resolve => {
+    const lib = opts.tls ? https : http
+    const headers: Record<string, string> = { 'User-Agent': 'SentriX-Audit', Accept: '*/*' }
+    if (opts.authorization) headers.Authorization = opts.authorization
+    const req = lib.request(
+      { host: opts.ip, port: opts.port, path: opts.path, method: 'GET', timeout: opts.timeoutMs, rejectUnauthorized: false, headers },
+      res => {
+        const wa = res.headers['www-authenticate']
+        res.resume() // drain, never read the body
+        resolve({ status: res.statusCode ?? 0, wwwAuthenticate: Array.isArray(wa) ? wa[0] : wa })
+      },
+    )
+    req.once('error', () => resolve(null))
+    req.once('timeout', () => { req.destroy(); resolve(null) })
+    req.end()
+  })
+}
+
 /** probeHttp with one retry (longer timeout) when the request got no answer at all. */
 async function probeHttpRetry(ip: string, port: number, tls: boolean, path: string, timeoutMs: number): Promise<HttpResult | null> {
   return (await probeHttp(ip, port, tls, path, timeoutMs)) ?? probeHttp(ip, port, tls, path, timeoutMs * 2)

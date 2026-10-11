@@ -46,24 +46,28 @@ const scanDevices = async (id: string): Promise<DeviceListItem[]> =>
 
 beforeEach(() => { resetLocalDb(); resetVulnStore() })
 
-test('hardened HTTPS-only cameras are Secure (an open web port is not evidence of a weakness)', async () => {
+test('devices whose model is not in vulnerabilities.txt are Healthy (an open port is not a finding)', async () => {
   const devices = await scanDevices(await completedScan())
-  for (const vendor of ['Bosch', 'Hanwha']) {
-    const d = devices.find(x => x.vendor === vendor)!
-    expect(d).toMatchObject({ security_status: 'secure', risk_score: 0, risk_level: 'secure', community_match_count: 0 })
+  // These demo models are not listed in the shipped file, so they are Healthy.
+  for (const model of ['FLEXIDOME IP 5000i', 'XNV-8080R', 'NVR4108HS-4KS2']) {
+    const d = devices.find(x => x.model === model)!
+    expect(d).toMatchObject({
+      overall_security_status: 'HEALTHY', security_status: 'secure',
+      risk_score: 0, risk_level: 'secure', known_vulnerability_count: 0,
+    })
   }
   const dash = (await (await getDashboard(get('http://localhost/api/dashboard'))).json()).data
-  expect(dash.secure_devices).toBe(2)
+  expect(dash.healthy_devices).toBe(3)
+  expect(dash.not_verified_devices).toBe(0)
 }, 60000)
 
 test('scan results, devices, dashboard and report all agree on the same scan', async () => {
   const id = await completedScan()
   const { data } = await (await getResults(get('http://localhost'), { params: { id } })).json()
   const devices = await scanDevices(id)
-  const statusOf = (deviceId: string) => getSecurityStatus(
-    data.vulnerabilities.filter((v: { device_id: string }) => v.device_id === deviceId).length,
-    data.community_matches.filter((m: { device_id: string }) => m.device_id === deviceId))
-  for (const d of devices) expect(d.security_status).toBe(statusOf(d.id))
+  // The results API and the devices list agree on each device's overall status.
+  const resById = new Map(data.devices.map((d: { id: string; overall_security_status: string }) => [d.id, d.overall_security_status]))
+  for (const d of devices) expect(resById.get(d.id)).toBe(d.overall_security_status)
 
   const vulnerable = devices.filter(d => d.security_status === 'vulnerable').length
   const potential = devices.filter(d => d.security_status === 'potential').length

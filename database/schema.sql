@@ -43,6 +43,11 @@ CREATE TABLE IF NOT EXISTS devices (
   risk_score INT DEFAULT 0 CHECK (risk_score >= 0 AND risk_score <= 100),
   risk_level TEXT DEFAULT 'secure' CHECK (risk_level IN ('secure', 'low', 'medium', 'high', 'critical')),
   status TEXT DEFAULT 'active',
+  -- Separated per-device assessment statuses (computed at scan time)
+  known_vulnerability_status TEXT CHECK (known_vulnerability_status IN ('MATCHED', 'NO_MATCH', 'UNVERIFIED')),
+  authentication_status TEXT CHECK (authentication_status IN ('CONFIRMED_DEFAULT_CREDENTIALS', 'AUTHENTICATION_REJECTED', 'NOT_TESTED', 'AUTHENTICATION_ERROR')),
+  overall_security_status TEXT CHECK (overall_security_status IN ('VULNERABLE', 'HEALTHY', 'NOT_VERIFIED')),
+  trust_score INT DEFAULT 100 CHECK (trust_score >= 0 AND trust_score <= 100),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -55,6 +60,8 @@ CREATE TABLE IF NOT EXISTS vulnerabilities (
   severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
   score INT NOT NULL DEFAULT 0,
   recommendation TEXT NOT NULL,
+  -- Observation only (open port, HTTP-only, …): shown but excluded from risk/status
+  informational BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

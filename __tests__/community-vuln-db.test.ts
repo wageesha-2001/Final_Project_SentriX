@@ -359,81 +359,80 @@ describe('matchDevice', () => {
     expect(globMatch('a.b', 'axb')).toBe(false)
   })
 
-  it('High: vendor + exact model + firmware', () => {
+  it('Confirmed (High): exact model listed + firmware in range', () => {
     const [m] = matchDevice(device, [asMatchable(record())])
     expect(m.match_confidence).toBe('High')
+    expect(m.confirmed).toBe(true)
     expect(m.match_type).toBe('vendor_model_firmware')
-    expect(m.matched_fields).toEqual(expect.arrayContaining(['vendor', 'model', 'firmware', 'port']))
+    expect(m.matched_fields).toEqual(expect.arrayContaining(['vendor', 'model', 'firmware']))
     expect(m.risk_score_added).toBe(12)
     expect(m.matched_reason).toMatch(/model DS-2CD2043G0-I is listed/)
   })
 
-  it('High: exact model match without firmware restriction', () => {
+  it('Confirmed (High): exact model, record affects all firmware (*)', () => {
     const [m] = matchDevice(device, [asMatchable(record({ affected_firmware: ['*'] }))])
-    expect(m).toMatchObject({ match_confidence: 'High', match_type: 'exact_model' })
+    expect(m).toMatchObject({ match_confidence: 'High', match_type: 'exact_model', confirmed: true })
   })
 
-  it('Medium: vendor + protocol/port match on any model', () => {
-    const rec = record({ category: 'RTSP Exposure', affected_models: ['*'], affected_firmware: ['*'], affected_ports: [554], affected_protocols: ['RTSP'], risk_score: 20, severity: 'High', cvss_score: 7.5 })
-    const [m] = matchDevice(device, [asMatchable(rec)])
-    expect(m.match_confidence).toBe('Medium')
-    expect(m.risk_score_added).toBe(15) // 75% of 20
+  it('NO MATCH: a wildcard/series model pattern never matches (Case 8 / H)', () => {
+    // vendor + ports present, but Models is * or a pattern → not evidence of a known vuln
+    expect(matchDevice(device, [asMatchable(record({ affected_models: ['*'], affected_firmware: ['*'], affected_ports: [554], affected_protocols: ['RTSP'] }))])).toEqual([])
+    expect(matchDevice(device, [asMatchable(record({ affected_models: ['DS-2CD2*'], affected_firmware: ['*'] }))])).toEqual([])
   })
 
-  it('Medium: model pattern (not exact) without firmware', () => {
-    const [m] = matchDevice(device, [asMatchable(record({ affected_models: ['DS-2CD2*'], affected_firmware: ['*'] }))])
-    expect(m).toMatchObject({ match_confidence: 'Medium', match_type: 'vendor_model_pattern' })
+  it('NO MATCH: a vendor-only record never matches (Case D)', () => {
+    expect(matchDevice(device, [asMatchable(record({ affected_models: ['*'], affected_firmware: ['*'], affected_ports: [], affected_protocols: [] }))])).toEqual([])
   })
 
-  it('Low: generic record on another vendor → Potential Match at 50%', () => {
-    const rec = record({ vendor: 'Generic ONVIF Camera', affected_models: ['*'], affected_firmware: ['*'], category: 'RTSP Exposure', affected_ports: [554], affected_protocols: ['RTSP'], risk_score: 20, severity: 'High', cvss_score: 7 })
-    const [m] = matchDevice(device, [asMatchable(rec)])
+  it('UNVERIFIED (Low): model listed, specific firmware, device firmware Unknown (Case G)', () => {
+    const [m] = matchDevice({ ...device, firmware_version: 'Unknown' }, [asMatchable(record())])
     expect(m.match_confidence).toBe('Low')
-    expect(m.risk_score_added).toBe(10)
-    expect(m.matched_reason).toMatch(/^Potential match:/)
-    expect(confidenceLabel(m.match_confidence)).toBe('Potential Match')
+    expect(m.confirmed).toBe(false)
+    expect(m.match_type).toBe('unverified_firmware')
+    expect(m.risk_score_added).toBe(0)
+    expect(m.matched_reason).toMatch(/^Potential match \(unverified firmware\)/)
   })
 
-  it('Low: vendor-only record with no other signal', () => {
-    const rec = record({ affected_models: ['*'], affected_firmware: ['*'], affected_ports: [], affected_protocols: [], category: 'Default Credentials', severity: 'Critical', cvss_score: 9, risk_score: 30 })
-    const [m] = matchDevice(device, [asMatchable(rec)])
-    expect(m).toMatchObject({ match_confidence: 'Low', match_type: 'vendor_only', risk_score_added: 15 })
+  it('NO MATCH: model listed but firmware outside the affected range (Case 3)', () => {
+    expect(matchDevice({ ...device, firmware_version: 'V6.1.0' }, [asMatchable(record({ affected_firmware: ['V5.5.*'] }))])).toEqual([])
   })
 
-  it('does not match a different vendor, model, firmware, device type, or unexposed service', () => {
-    expect(matchDevice(device, [asMatchable(record({ vendor: 'Dahua' }))])).toEqual([])
+  it('NO MATCH: same vendor, different model (Case 2 / 9)', () => {
+    expect(matchDevice({ ...device, model: 'DS-2CD2347G2-LU' }, [asMatchable(record())])).toEqual([])
     expect(matchDevice(device, [asMatchable(record({ affected_models: ['OTHER-MODEL'] }))])).toEqual([])
-    expect(matchDevice(device, [asMatchable(record({ affected_firmware: ['V6.*'] }))])).toEqual([])
-    expect(matchDevice(device, [asMatchable(record({ device_type: 'nvr' }))])).toEqual([])
-    expect(matchDevice(device, [asMatchable(record({ affected_ports: [23], affected_protocols: ['Telnet'] }))])).toEqual([])
   })
 
-  it('a generic record with only a device-type match is too weak to report', () => {
-    const rec = record({ vendor: 'Generic IP Camera', device_type: 'camera', affected_models: ['*'], affected_firmware: ['*'], affected_ports: [], affected_protocols: [], detection_keywords: [] })
+  it('NO MATCH: different vendor or device type, even with the model listed', () => {
+    expect(matchDevice({ ...device, vendor: 'Dahua' }, [asMatchable(record())])).toEqual([])
+    expect(matchDevice(device, [asMatchable(record({ device_type: 'nvr' }))])).toEqual([])
+  })
+
+  it('match_fields cannot drop the model requirement', () => {
+    const rec = record({ affected_models: ['OTHER-MODEL'], match_fields: ['vendor', 'port'] })
     expect(matchDevice(device, [asMatchable(rec)])).toEqual([])
   })
 
-  it('honours match_fields (ignores signals that are not listed)', () => {
-    const rec = record({ affected_models: ['OTHER-MODEL'], match_fields: ['vendor', 'port'] })
-    const [m] = matchDevice(device, [asMatchable(rec)])
-    expect(m.match_confidence).toBe('Medium')
+  it('Case 9: only the affected Hikvision model matches, not its sibling', () => {
+    const rec = asMatchable(record({ affected_models: ['DS-2CD2043G0-I'], affected_firmware: ['*'] }))
+    expect(matchDevice(device, [rec])).toHaveLength(1)                                   // listed model
+    expect(matchDevice({ ...device, model: 'DS-2CD2347G2-LU' }, [rec])).toEqual([])      // sibling, not listed
   })
 
-  it('keeps only the strongest match per category', () => {
-    const specific = asMatchable(record(), 'a')
-    const generic = asMatchable(record({ vendor: 'Generic NVR', affected_models: ['*'], affected_firmware: ['*'], risk_score: 19, severity: 'Medium' }), 'b')
-    const result = matchDevice(device, [generic, specific])
+  it('keeps only the strongest match per category (confirmed over unverified)', () => {
+    const confirmed = asMatchable(record(), 'a')
+    const unverified = asMatchable(record({ affected_firmware: ['V5.5.*'] }), 'b')
+    const result = matchDevice({ ...device, firmware_version: 'V5.5.800' }, [unverified, confirmed])
     expect(result).toHaveLength(1)
-    expect(result[0].vulnerability_id).toBe('a')
+    expect(result[0].confirmed).toBe(true)
   })
 
-  it('matches the generic NVR demo device exactly (generic vendor + model)', () => {
+  it('matches the generic NVR demo device by exact model + firmware', () => {
     const nvr: MatchableDevice = { vendor: 'Generic', model: 'NVR-8CH-4K', firmware_version: 'V1.0.0', device_type: 'nvr', open_ports: [{ port: 80, service: 'HTTP', protocol: 'tcp' }], protocols: ['HTTP'] }
-    const rec = record({ vendor: 'Generic NVR', device_type: 'nvr', affected_models: ['NVR-8CH-4K'], affected_firmware: ['V1.0.*'], category: 'Web Interface Security' })
-    expect(matchDevice(nvr, [asMatchable(rec)])[0].match_confidence).toBe('High')
+    const rec = record({ vendor: 'Generic', device_type: 'nvr', affected_models: ['NVR-8CH-4K'], affected_firmware: ['V1.0.*'], category: 'Web Interface Security' })
+    expect(matchDevice(nvr, [asMatchable(rec)])[0]).toMatchObject({ match_confidence: 'High', confirmed: true })
   })
 
-  it('shipped dataset yields sensible matches for the demo Hikvision camera', () => {
+  it('shipped dataset confirms the demo Hikvision camera but not an unlisted sibling', () => {
     const records = loadShipped().valid.map((r, i) => asMatchable(r, `id-${i}`))
     const hik: MatchableDevice = {
       vendor: 'Hikvision', model: 'DS-2CD2043G0-I', firmware_version: 'V5.5.800', device_type: 'camera',
@@ -441,9 +440,11 @@ describe('matchDevice', () => {
       protocols: ['HTTP', 'RTSP', 'ONVIF', 'Hikvision-SDK'],
     }
     const result = matchDevice(hik, records)
-    expect(result.length).toBeGreaterThan(3)
-    expect(result.some(r => r.match_confidence === 'High')).toBe(true)
+    expect(result.some(r => r.confirmed)).toBe(true)
     expect(new Set(result.map(r => r.category)).size).toBe(result.length) // one per category
+    // An unlisted sibling model gets no confirmed match from DS-2CD2* records.
+    const sibling = matchDevice({ ...hik, model: 'DS-2CD2347G2-LU' }, records)
+    expect(sibling.some(r => r.confirmed)).toBe(false)
   })
 })
 

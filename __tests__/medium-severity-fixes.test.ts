@@ -132,8 +132,8 @@ describe('flow-01: Internet Exposure needs a public address', () => {
     expect(m).toMatchObject({ vulnerability_id: 'R', match_confidence: 'High' })
   })
 
-  it('only the exposure category is gated', () => {
-    expect(matchDevice(nvr(), [rec({ category: 'RTSP Exposure', affected_ports: [554] })])).toHaveLength(1)
+  it('only the exposure category is gated (a listed model still matches)', () => {
+    expect(matchDevice(nvr(), [rec({ category: 'RTSP Exposure', affected_models: ['DS-7608NI-K2'], affected_firmware: ['*'], affected_ports: [554] })])).toHaveLength(1)
   })
 
   it.each([
@@ -145,20 +145,20 @@ describe('flow-01: Internet Exposure needs a public address', () => {
   })
 })
 
-describe('flow-08: knowing less never gives a stronger match', () => {
+describe('flow-08: a record without a listed model never matches', () => {
+  // A record whose Models is a wildcard/pattern is not evidence about any one
+  // model, no matter how much (or little) is known about the device.
   const generic = rec({ category: 'RTSP Exposure', affected_ports: [554], affected_protocols: ['RTSP'] })
 
-  it('an Unknown-vendor device gets the same Low confidence as an identified Hikvision', () => {
-    const [unknown] = matchDevice(nvr({ vendor: 'Unknown', model: 'Unknown', device_type: 'unknown' }), [generic])
-    const [hik] = matchDevice(nvr(), [generic])
-    expect(hik.match_confidence).toBe('Low')
-    expect(unknown.match_confidence).toBe('Low') // was Medium / vendor_service, +23
-    expect(unknown.risk_score_added).toBeLessThanOrEqual(hik.risk_score_added)
+  it('matches neither an Unknown-vendor device nor an identified Hikvision', () => {
+    expect(matchDevice(nvr({ vendor: 'Unknown', model: 'Unknown', device_type: 'unknown' }), [generic])).toEqual([])
+    expect(matchDevice(nvr(), [generic])).toEqual([])
+    expect(matchDevice(nvr({ vendor: 'Generic', model: 'NVR-8CH-4K' }), [generic])).toEqual([])
   })
 
-  it('a device identified as a generic brand still aligns with generic records', () => {
-    const [m] = matchDevice(nvr({ vendor: 'Generic', model: 'NVR-8CH-4K' }), [generic])
-    expect(m.match_confidence).toBe('Medium')
+  it('matches only when the device model is explicitly listed', () => {
+    const listed = rec({ category: 'RTSP Exposure', affected_models: ['DS-7608NI-K2'], affected_firmware: ['*'], affected_ports: [554] })
+    expect(matchDevice(nvr(), [listed])).toHaveLength(1)
   })
 })
 

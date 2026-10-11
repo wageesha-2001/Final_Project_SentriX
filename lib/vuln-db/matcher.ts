@@ -2,15 +2,26 @@
  * Community vulnerability matching engine.
  *
  * Pure and deterministic: compares an already-discovered device description
- * against stored records. It never contacts the device.
+ * against records loaded from data/vulnerabilities.txt. It never contacts the
+ * device and never invents records.
  *
- * Confidence (deliberately conservative — never overclaims):
- *   High   — vendor + exact model (or model pattern + firmware) match
- *   Medium — vendor match plus a model-pattern, firmware, port or protocol match
- *   Low    — broad match (generic record, vendor-only, device type, keyword);
- *            always presented to users as a "Potential Match"
+ * MATCHING RULE (authoritative — see also the header of vulnerabilities.txt):
+ *   A record applies to a device only when the device's EXACT model is listed
+ *   in the record's Models AND the firmware is consistent with the record's
+ *   Firmware. Records with `Models: *` or a series/wildcard pattern (e.g.
+ *   DS-2CD2*) never match: they say nothing about one specific model, and a
+ *   vendor/port/protocol signal alone is not evidence of a known vulnerability.
+ *
+ *   Confirmed (High)   — exact model listed AND (firmware is `*` OR the device's
+ *                        known firmware matches the record's firmware range).
+ *   Unverified (Low)   — exact model listed, the record names a specific firmware
+ *                        range, but the device's firmware is Unknown so the range
+ *                        cannot be checked. Reported as a potential match, never
+ *                        counted as a confirmed vulnerability.
+ *   No match           — anything else (different/absent model, firmware known to
+ *                        be outside the range, different vendor or device type).
  */
-import type { CommunityVulnerability, MatchConfidence, CommunityMatchField, OpenPort } from '@/types'
+import type { CommunityVulnerability, MatchConfidence, OpenPort } from '@/types'
 import { CONFIDENCE_FACTOR, SEVERITIES } from './constants'
 
 export interface MatchableDevice {
@@ -38,24 +49,19 @@ export interface MatchResult {
   matched_fields: string[]
   matched_reason: string
   risk_score_added: number
+  /** True only for a confirmed (model + firmware) match; false for unverified. */
+  confirmed: boolean
 }
 
-/** Maximum low-confidence (Potential Match) results kept per device. */
-export const MAX_LOW_CONFIDENCE_MATCHES = 3
-
 const CONFIDENCE_RANK: Record<MatchConfidence, number> = { High: 3, Medium: 2, Low: 1 }
-const WEB_MANAGEMENT_PORTS = new Set([80, 443, 8080, 8443])
-const WEB_MANAGEMENT_PROTOCOLS = new Set(['http', 'https', 'http-alt'])
-const ALL_FIELDS: CommunityMatchField[] = ['vendor', 'model', 'firmware', 'device_type', 'port', 'protocol', 'keyword']
+const EXPOSURE_CATEGORY = 'internet exposure'
 
 const norm = (s: unknown) => String(s ?? '').trim().toLowerCase()
 const normVersion = (s: string) => norm(s).replace(/^v(?=\d)/, '')
+const isUnknown = (s: string) => { const v = norm(s); return v === '' || v === 'unknown' }
 const isWildcard = (list: string[]) => list.length === 0 || list.every(x => ['*', 'any'].includes(norm(x)))
-const isGenericVendor = (v: string) => /^(generic|unknown)/.test(norm(v))
-// A device whose vendor could not be identified is not "aligned" with generic
-// records: knowing less about a device must never produce a stronger claim.
-const isGenericDevice = (v: string) => /^generic/.test(norm(v))
-const EXPOSURE_CATEGORY = 'internet exposure'
+/** A record vendor of "", "any" or "Generic…"/"Unknown…" applies to any vendor (the model still pins the device). */
+const isGenericVendor = (v: string) => { const n = norm(v); return n === '' || n === 'any' || /^(generic|unknown)/.test(n) }
 
 /** RFC1918, loopback, link-local and CGNAT addresses are not internet-reachable. */
 export function isPrivateIp(ip: string): boolean {
@@ -82,8 +88,13 @@ export function applyConfidenceFactor(riskScore: number, confidence: MatchConfid
   return Math.round(riskScore * CONFIDENCE_FACTOR[confidence])
 }
 
+/** True when the device's exact model appears in the record's model list (no patterns). */
+function modelIsListed(rec: MatchableRecord, model: string): boolean {
+  if (isUnknown(model)) return false
+  return rec.affected_models.some(m => !m.includes('*') && norm(m) !== 'any' && norm(m) === norm(model))
+}
+
 function evaluate(device: MatchableDevice, rec: MatchableRecord): MatchResult | null {
-  const fields = new Set<string>(rec.match_fields.length > 0 ? rec.match_fields : ALL_FIELDS)
   const reasons: string[] = []
   const matched: string[] = []
 
@@ -93,101 +104,48 @@ function evaluate(device: MatchableDevice, rec: MatchableRecord): MatchResult | 
     return null
   }
 
-  // ── Vendor ────────────────────────────────────────────────────────────────
-  const vendorSpecific = !isGenericVendor(rec.vendor)
-  const deviceGeneric = isGenericDevice(device.vendor)
-  let vendorAligned: boolean
-  if (vendorSpecific) {
-    vendorAligned = norm(device.vendor) === norm(rec.vendor)
-    if (!vendorAligned && fields.has('vendor')) return null
-    if (vendorAligned) { matched.push('vendor'); reasons.push(`vendor ${device.vendor} matches`) }
-  } else {
-    vendorAligned = deviceGeneric
+  // ── Vendor: if the record names a vendor and the device's vendor is known and
+  //    different, the record does not apply. (An Unknown device vendor does not
+  //    block a model match — the model is the authoritative key.) ──────────────
+  if (!isGenericVendor(rec.vendor) && !isUnknown(device.vendor)) {
+    if (norm(device.vendor) !== norm(rec.vendor)) return null
+    matched.push('vendor'); reasons.push(`vendor ${device.vendor} matches`)
   }
 
-  // ── Device type ───────────────────────────────────────────────────────────
-  const typeSpecific = rec.device_type !== 'any'
-  const typeKnown = norm(device.device_type) !== 'unknown' && device.device_type !== ''
-  let typeHit = false
-  if (typeSpecific && typeKnown && fields.has('device_type')) {
+  // ── Device type: a specific record type must agree with a known device type ─
+  if (rec.device_type !== 'any' && !isUnknown(device.device_type)) {
     if (norm(rec.device_type) !== norm(device.device_type)) return null
-    typeHit = true
     matched.push('device_type'); reasons.push(`device type ${device.device_type} matches`)
   }
 
-  // ── Model ─────────────────────────────────────────────────────────────────
-  const modelSpecific = !isWildcard(rec.affected_models) && fields.has('model')
-  let modelHit = false
-  let modelExact = false
-  if (modelSpecific) {
-    const hit = rec.affected_models.find(m => globMatch(m, device.model))
-    if (!hit) return null
-    modelHit = true
-    modelExact = !hit.includes('*')
-    matched.push('model')
-    reasons.push(modelExact ? `model ${device.model} is listed` : `model ${device.model} matches pattern ${hit}`)
-  }
+  // ── Model (REQUIRED): the device's exact model must be listed. ──────────────
+  if (!modelIsListed(rec, device.model)) return null
+  matched.push('model'); reasons.push(`model ${device.model} is listed`)
 
-  // ── Firmware ──────────────────────────────────────────────────────────────
-  const fwSpecific = !isWildcard(rec.affected_firmware) && fields.has('firmware')
-  let fwHit = false
-  if (fwSpecific) {
+  // ── Firmware ───────────────────────────────────────────────────────────────
+  let confirmed: boolean
+  if (isWildcard(rec.affected_firmware)) {
+    confirmed = true
+    reasons.push('all firmware versions affected')
+  } else if (!isUnknown(device.firmware_version)) {
     const hit = rec.affected_firmware.find(f => globMatch(f, device.firmware_version, normVersion))
-    if (!hit) return null
-    fwHit = true
+    if (!hit) return null // firmware known and outside the affected range → no match
+    confirmed = true
     matched.push('firmware'); reasons.push(`firmware ${device.firmware_version} matches ${hit}`)
-  }
-
-  // ── Services: ports / protocols ───────────────────────────────────────────
-  const openPorts = new Set(device.open_ports.map(p => p.port))
-  const protoSet = new Set([
-    ...device.protocols.map(norm),
-    ...device.open_ports.map(p => norm(p.service)),
-  ])
-  const usePorts = rec.affected_ports.length > 0 && fields.has('port')
-  const useProtos = rec.affected_protocols.length > 0 && fields.has('protocol')
-  const portHits = usePorts ? rec.affected_ports.filter(p => openPorts.has(p)) : []
-  const protoHits = useProtos ? rec.affected_protocols.filter(p => protoSet.has(norm(p))) : []
-  if ((usePorts || useProtos) && portHits.length === 0 && protoHits.length === 0) return null
-  if (portHits.length > 0) { matched.push('port'); reasons.push(`open port${portHits.length > 1 ? 's' : ''} ${portHits.join(', ')} in affected ports`) }
-  if (protoHits.length > 0) { matched.push('protocol'); reasons.push(`protocol ${protoHits.join(', ')} detected`) }
-  const serviceHit = portHits.length > 0 || protoHits.length > 0
-
-  // ── Keywords (never gate, only add evidence) ──────────────────────────────
-  const haystack = norm([
-    device.vendor, device.model, device.firmware_version,
-    ...device.protocols, ...device.open_ports.map(p => p.service),
-  ].join(' '))
-  const kwHits = fields.has('keyword') ? rec.detection_keywords.filter(k => k && haystack.includes(norm(k))) : []
-  if (kwHits.length > 0) { matched.push('keyword'); reasons.push(`keyword ${kwHits.join(', ')} observed`) }
-
-  // ── Confidence ────────────────────────────────────────────────────────────
-  let confidence: MatchConfidence
-  let matchType: string
-  if (vendorAligned && modelHit && (modelExact || fwHit)) {
-    confidence = 'High'
-    matchType = fwHit ? 'vendor_model_firmware' : 'exact_model'
-  } else if (vendorAligned && (vendorSpecific || deviceGeneric) && (modelHit || fwHit || serviceHit)) {
-    confidence = 'Medium'
-    matchType = modelHit ? 'vendor_model_pattern' : fwHit ? 'vendor_firmware' : 'vendor_service'
-  } else if (vendorSpecific && vendorAligned) {
-    confidence = 'Low'
-    matchType = 'vendor_only'
-  } else if (typeHit || serviceHit || kwHits.length > 0) {
-    // Every CCTV device has a web management interface, so a generic record
-    // matching only on 80/443/8080 (HTTP/HTTPS) is no evidence of the weakness.
-    const strongServiceHit =
-      portHits.some(p => !WEB_MANAGEMENT_PORTS.has(p)) ||
-      protoHits.some(p => !WEB_MANAGEMENT_PROTOCOLS.has(norm(p)))
-    if (!strongServiceHit && kwHits.length === 0) return null // device type / web port alone is too weak
-    confidence = 'Low'
-    matchType = serviceHit ? 'generic_service' : 'keyword'
   } else {
-    return null
+    // Model listed, specific firmware range, but device firmware is Unknown:
+    // cannot confirm → report as an unverified potential match.
+    confirmed = false
+    reasons.push(`firmware unknown; affected range ${rec.affected_firmware.join(', ')} could not be verified`)
   }
 
-  const prefix = confidence === 'Low' ? 'Potential match: ' : ''
+  const confidence: MatchConfidence = confirmed ? 'High' : 'Low'
+  const matchType = confirmed
+    ? (matched.includes('firmware') ? 'vendor_model_firmware' : 'exact_model')
+    : 'unverified_firmware'
+  const prefix = confirmed ? '' : 'Potential match (unverified firmware): '
   const reason = `${prefix}${reasons.join('; ')}.`.replace(/^(.)/, c => c.toUpperCase())
+
   return {
     vulnerability_id: rec.id,
     category: rec.category,
@@ -195,14 +153,16 @@ function evaluate(device: MatchableDevice, rec: MatchableRecord): MatchResult | 
     match_confidence: confidence,
     matched_fields: Array.from(new Set(matched)),
     matched_reason: reason,
-    risk_score_added: applyConfidenceFactor(rec.risk_score, confidence),
+    risk_score_added: confirmed ? applyConfidenceFactor(rec.risk_score, confidence) : 0,
+    confirmed,
   }
 }
 
 /**
  * Match one device against the database. To avoid scoring the same weakness
- * twice, only the strongest match per category is kept (higher confidence
- * first, then higher risk score). Results are sorted most severe first.
+ * twice, only the strongest match per category is kept (confirmed over
+ * unverified, then higher risk score). Results are sorted most severe first.
+ * Records are de-duplicated by category.
  */
 export function matchDevice(device: MatchableDevice, records: MatchableRecord[]): MatchResult[] {
   const byCategory = new Map<string, { result: MatchResult; rec: MatchableRecord }>()
@@ -218,13 +178,16 @@ export function matchDevice(device: MatchableDevice, records: MatchableRecord[])
       byCategory.set(rec.category, { result, rec })
     }
   }
-  const ranked = Array.from(byCategory.values())
+  return Array.from(byCategory.values())
     .sort((a, b) =>
       SEVERITIES.indexOf(a.rec.severity) - SEVERITIES.indexOf(b.rec.severity) ||
       b.result.risk_score_added - a.result.risk_score_added)
-  // Broad "Potential Match" results are noisy: keep only the strongest few per device.
-  let lowKept = 0
-  return ranked
-    .filter(x => x.result.match_confidence !== 'Low' || ++lowKept <= MAX_LOW_CONFIDENCE_MATCHES)
     .map(x => x.result)
+}
+
+/** Known-vulnerability status for a device, from its matches. */
+export function knownVulnerabilityStatus(matches: MatchResult[]): 'MATCHED' | 'NO_MATCH' | 'UNVERIFIED' {
+  if (matches.some(m => m.confirmed)) return 'MATCHED'
+  if (matches.length > 0) return 'UNVERIFIED'
+  return 'NO_MATCH'
 }

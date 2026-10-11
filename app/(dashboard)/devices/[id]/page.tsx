@@ -31,13 +31,32 @@ export default function DeviceDetailsPage() {
   if (!device) return <DashboardLayout title="Device Details"><div className="text-cyber-muted text-center py-20">Device not found</div></DashboardLayout>
 
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3 }
-  const securityStatus = getSecurityStatus(vulns.length, matches)
+  const confirmedVulns = vulns.filter(v => !v.informational)
+  const informationalVulns = vulns.filter(v => v.informational)
+  const confirmedMatches = matches.filter(m => m.match_confidence === 'High')
+
+  // Prefer persisted statuses; fall back for devices scanned before they existed.
+  const overall = device.overall_security_status
+    ?? (getSecurityStatus(confirmedVulns.length, confirmedMatches) === 'vulnerable' ? 'VULNERABLE'
+      : matches.length > 0 ? 'NOT_VERIFIED' : 'HEALTHY')
+  const knownStatus = device.known_vulnerability_status
+    ?? (confirmedMatches.length > 0 ? 'MATCHED' : matches.length > 0 ? 'UNVERIFIED' : 'NO_MATCH')
+  const authStatus = device.authentication_status ?? 'NOT_TESTED'
+  const trustScore = device.trust_score ?? calculateTrustScore(device.risk_score)
+
   const STATUS_STYLE = {
-    vulnerable: { label: 'Vulnerable', className: 'text-cyber-red border-cyber-red/30 bg-cyber-red/10' },
-    potential: { label: 'Potential issues', className: 'text-cyber-purple border-cyber-purple/30 bg-cyber-purple/10' },
-    secure: { label: 'Secure', className: 'text-cyber-green border-cyber-green/30 bg-cyber-green/10' },
-  }[securityStatus]
-  const sortedVulns = [...vulns].sort((a, b) => (severityOrder[a.severity] ?? 4) - (severityOrder[b.severity] ?? 4))
+    VULNERABLE: { label: 'Vulnerable', className: 'text-cyber-red border-cyber-red/30 bg-cyber-red/10' },
+    NOT_VERIFIED: { label: 'Not Verified', className: 'text-cyber-purple border-cyber-purple/30 bg-cyber-purple/10' },
+    HEALTHY: { label: 'Healthy', className: 'text-cyber-green border-cyber-green/30 bg-cyber-green/10' },
+  }[overall]
+  const AUTH_LABEL: Record<string, string> = {
+    CONFIRMED_DEFAULT_CREDENTIALS: 'Default credentials confirmed',
+    AUTHENTICATION_REJECTED: 'Credentials rejected (good)',
+    NOT_TESTED: 'Not tested',
+    AUTHENTICATION_ERROR: 'Could not test',
+  }
+  const KNOWN_LABEL: Record<string, string> = { MATCHED: 'Matched', NO_MATCH: 'No match', UNVERIFIED: 'Unverified' }
+  const sortedVulns = [...confirmedVulns].sort((a, b) => (severityOrder[a.severity] ?? 4) - (severityOrder[b.severity] ?? 4))
 
   return (
     <DashboardLayout title="Device Details" subtitle={`${device.vendor} ${device.model}`}>
@@ -69,8 +88,12 @@ export default function DeviceDetailsPage() {
             {[
               { label: 'Device Type', value: device.device_type.toUpperCase(), icon: Server },
               { label: 'Firmware', value: device.firmware_version, icon: Shield },
+              { label: 'Known Vulnerability', value: KNOWN_LABEL[knownStatus], icon: AlertTriangle },
+              { label: 'Authentication', value: AUTH_LABEL[authStatus], icon: Shield },
+              { label: 'Overall Status', value: STATUS_STYLE.label, icon: Shield },
+              { label: 'Risk / Trust', value: `${device.risk_score} / ${trustScore}`, icon: Shield },
               { label: 'Open Ports', value: device.open_ports.length.toString(), icon: Wifi },
-              { label: 'Failed Checks / DB Matches', value: `${vulns.length} / ${matches.length}`, icon: AlertTriangle },
+              { label: 'Confirmed Findings', value: `${confirmedVulns.length + confirmedMatches.length}`, icon: AlertTriangle },
             ].map(item => (
               <div key={item.label} className="bg-cyber-surface rounded-lg p-3">
                 <item.icon className="w-4 h-4 text-cyber-muted mb-1" />
@@ -110,23 +133,36 @@ export default function DeviceDetailsPage() {
                 <div className="h-full scan-progress-bar rounded-full" style={{ width: `${device.risk_score}%` }} />
               </div>
               <p className="text-right text-xs text-cyber-muted mt-1 font-mono">
-                Risk {device.risk_score}/100 · Trust {calculateTrustScore(device.risk_score)}/100
+                Risk {device.risk_score}/100 · Trust {trustScore}/100
               </p>
+              <div className="mt-4 pt-4 border-t border-cyber-border">
+                <h4 className="text-xs text-cyber-text-muted uppercase mb-2">Authentication Assessment</h4>
+                <p className="text-xs text-cyber-text-muted">
+                  {authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS'
+                    ? 'An authorized check confirmed this device accepts default credentials. Change them immediately.'
+                    : authStatus === 'AUTHENTICATION_REJECTED'
+                      ? 'An authorized default-credential attempt was rejected — no default-credential finding.'
+                      : authStatus === 'AUTHENTICATION_ERROR'
+                        ? 'The authentication check could not be completed (timeout, lockout or service error).'
+                        : 'No authorized credential test was performed for this device.'}
+                </p>
+                <p className="text-[10px] text-cyber-text-muted mt-1">Passwords are never displayed, logged or stored in results.</p>
+              </div>
             </div>
           </motion.div>
         </div>
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="cyber-card p-5">
           <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-4">
-            Failed Security Checks ({vulns.length})
+            Confirmed Findings ({confirmedVulns.length})
           </h3>
           {sortedVulns.length === 0 ? (
             <div className="flex items-center gap-3 p-4 bg-cyber-green/5 border border-cyber-green/20 rounded-lg">
               <CheckCircle className="w-5 h-5 text-cyber-green" />
               <div>
-                <p className="text-sm font-semibold text-cyber-green">No Failed Security Checks</p>
+                <p className="text-sm font-semibold text-cyber-green">No Confirmed Findings</p>
                 <p className="text-xs text-cyber-text-muted">
-                  This device passed all enabled security checks.{matches.length > 0 ? ' Review the community vulnerability matches below.' : ''}
+                  No confirmed vulnerability or default-credential finding for this device.{matches.length > 0 ? ' Review the database matches below.' : ''}
                 </p>
               </div>
             </div>
@@ -149,6 +185,25 @@ export default function DeviceDetailsPage() {
             </div>
           )}
         </motion.div>
+
+        {informationalVulns.length > 0 && (
+          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="cyber-card p-5">
+            <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-1">
+              Informational Observations ({informationalVulns.length})
+            </h3>
+            <p className="text-xs text-cyber-muted mb-3">
+              Service and configuration observations. These do not match a known vulnerability record and do not affect the risk score or status.
+            </p>
+            <div className="space-y-2">
+              {informationalVulns.map(v => (
+                <div key={v.id} className="p-3 bg-cyber-surface rounded-lg border border-cyber-border/50">
+                  <p className="font-medium text-white text-sm">{v.title}</p>
+                  <p className="text-xs text-cyber-text-muted mt-0.5">{v.description}</p>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
 
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="cyber-card p-5">
           <h3 className="text-sm font-semibold text-cyber-text-muted uppercase tracking-wider mb-1">

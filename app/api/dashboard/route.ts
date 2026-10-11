@@ -31,10 +31,17 @@ export async function GET(req: NextRequest) {
       total_devices: inventory.length,
       camera_devices: count(d => d.device_type === 'camera'),
       nvr_devices: count(d => d.device_type === 'nvr' || d.device_type === 'dvr'),
-      secure_devices: count(d => d.security_status === 'secure'),
-      potential_devices: count(d => d.security_status === 'potential'),
-      vulnerable_devices: count(d => d.security_status === 'vulnerable'),
+      // Separated classification (each device counted in exactly one bucket).
+      vulnerable_devices: count(d => d.overall_security_status === 'VULNERABLE'),
+      healthy_devices: count(d => d.overall_security_status === 'HEALTHY'),
+      not_verified_devices: count(d => d.overall_security_status === 'NOT_VERIFIED'),
+      // Unique devices with a confirmed known-vulnerability match / confirmed creds.
+      known_vulnerability_devices: count(d => d.known_vulnerability_status === 'MATCHED'),
+      confirmed_credential_devices: count(d => d.authentication_status === 'CONFIRMED_DEFAULT_CREDENTIALS'),
       critical_devices: count(d => d.risk_level === 'critical'),
+      // Legacy aliases kept so existing UI keeps working.
+      secure_devices: count(d => d.overall_security_status === 'HEALTHY'),
+      potential_devices: count(d => d.overall_security_status === 'NOT_VERIFIED'),
       total_scans: (scans || []).length,
       latest_scan: (scans || [])[0] || null,
       recent_scans: (scans || []).slice(0, 5),

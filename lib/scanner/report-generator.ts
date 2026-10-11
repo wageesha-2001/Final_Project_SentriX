@@ -1,6 +1,6 @@
 import { Scan, Device, Vulnerability, RiskLevel, EnrichedMatch } from '@/types'
 import { formatDate } from '@/lib/utils'
-import { getSecurityStatus } from '@/lib/risk/calculator'
+import { getSecurityStatus, overallToSecurityStatus } from '@/lib/risk/calculator'
 import { REPORT_NOTE, SEVERITIES, confidenceLabel } from '@/lib/vuln-db/constants'
 
 function esc(str: unknown): string {
@@ -99,14 +99,20 @@ function getRiskBadgeHtml(risk: RiskLevel): string {
 }
 
 export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): string {
-  // Same classification as the dashboard, Devices page and scan results
-  const statusOf = (d: DeviceWithVulns) => getSecurityStatus(d.vulnerabilities.length, d.community_matches ?? [])
+  // Confirmed findings only drive classification; informational observations do not.
+  const confirmedOf = (d: DeviceWithVulns) => d.vulnerabilities.filter(v => !v.informational)
+  // Same classification as the dashboard, Devices page and scan results: prefer
+  // the persisted overall status, fall back to deriving it from confirmed data.
+  const statusOf = (d: DeviceWithVulns): 'vulnerable' | 'potential' | 'secure' =>
+    d.overall_security_status
+      ? overallToSecurityStatus(d.overall_security_status)
+      : getSecurityStatus(confirmedOf(d).length, (d.community_matches ?? []).filter(m => m.match_confidence !== 'Low'))
   const secureDevices = devices.filter(d => statusOf(d) === 'secure').length
   const potentialDevices = devices.filter(d => statusOf(d) === 'potential').length
   const vulnerableDevices = devices.filter(d => statusOf(d) === 'vulnerable').length
   const criticalRiskDevices = devices.filter(d => d.risk_level === 'critical').length
-  const allVulns = devices.flatMap(d => d.vulnerabilities)
-  // Confirmed issues: check findings plus High/Medium-confidence database matches
+  const allVulns = devices.flatMap(d => confirmedOf(d))
+  // Confirmed issues: confirmed findings plus High/Medium-confidence database matches
   const confidentMatches = devices.flatMap(d => (d.community_matches ?? []).filter(m => m.match_confidence !== 'Low'))
   const criticalVulns = allVulns.filter(v => v.severity === 'critical').length +
     confidentMatches.filter(m => m.vulnerability.severity === 'Critical').length
@@ -130,7 +136,7 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
     keyFindings.get(key)!.devices.add(deviceId)
   }
   for (const d of devices) {
-    for (const v of d.vulnerabilities) {
+    for (const v of confirmedOf(d)) {
       if (v.severity === 'critical') addFinding('CRITICAL', v.title, d.id)
       if (v.severity === 'high') addFinding('HIGH', v.title, d.id)
     }
@@ -145,14 +151,19 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
     .join('')
 
   const devicesHtml = devices.map(device => {
-    const vulnsHtml = device.vulnerabilities.length > 0
-      ? device.vulnerabilities.map(v => `
+    const confirmed = confirmedOf(device)
+    const informational = device.vulnerabilities.filter(v => v.informational)
+    const vulnsHtml = confirmed.length > 0
+      ? confirmed.map(v => `
         <tr>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d">${esc(v.title)}</td>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d">${getRiskBadgeHtml(v.severity as RiskLevel)}</td>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:13px;color:#718096">${esc(v.recommendation)}</td>
         </tr>`).join('')
-      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No failed security checks (see Community Vulnerability Summary for database matches)</td></tr>'
+      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No confirmed findings (see Community Vulnerability Summary for database matches)</td></tr>'
+    const infoHtml = informational.length > 0
+      ? `<div style="margin-top:10px;font-size:12px;color:#718096">Informational observations (not scored): ${informational.map(v => esc(v.title)).join(', ')}</div>`
+      : ''
 
     return `
       <div style="background:#111827;border:1px solid #1e2d3d;border-radius:8px;padding:20px;margin-bottom:20px">
@@ -163,7 +174,8 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
           </div>
           <div style="text-align:right">
             ${getRiskBadgeHtml(device.risk_level)}
-            <p style="margin:4px 0 0;color:#718096;font-size:12px">Risk Score: ${esc(device.risk_score)}/100</p>
+            <p style="margin:4px 0 0;color:#718096;font-size:12px">Risk ${esc(device.risk_score)}/100 · Trust ${esc(device.trust_score ?? (100 - device.risk_score))}/100</p>
+            <p style="margin:2px 0 0;color:#718096;font-size:11px">Known vuln: ${esc(device.known_vulnerability_status ?? 'n/a')} · Auth: ${esc(device.authentication_status ?? 'NOT_TESTED')} · ${esc(device.overall_security_status ?? '')}</p>
           </div>
         </div>
         <table style="width:100%;border-collapse:collapse;font-size:14px;color:#e2e8f0">
@@ -176,6 +188,7 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
           </thead>
           <tbody>${vulnsHtml}</tbody>
         </table>
+        ${infoHtml}
         <div style="margin-top:12px;font-size:12px;color:#718096">
           Open Ports: ${device.open_ports.map((p: { port: number; service: string }) => `${esc(p.port)}/${esc(p.service)}`).join(', ')} |
           Device Type: ${esc(device.device_type.toUpperCase())} |

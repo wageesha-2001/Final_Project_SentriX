@@ -1,11 +1,23 @@
 import { createServerSupabase } from '@/lib/supabase/server'
-import { calculateRiskScoreWithMatches, getRiskLevel, getSecurityStatus, VULNERABILITY_DEFINITIONS, getOverallScanRisk, discountOverlappingMatches } from '@/lib/risk/calculator'
-import { matchDevice, MatchResult } from '@/lib/vuln-db/matcher'
+import {
+  getRiskLevel, VULNERABILITY_DEFINITIONS, getOverallScanRisk,
+  calculateDeviceRisk, calculateTrustScore, getOverallSecurityStatus, overallToSecurityStatus,
+  CREDENTIAL_FINDING,
+} from '@/lib/risk/calculator'
+import { matchDevice, MatchResult, knownVulnerabilityStatus } from '@/lib/vuln-db/matcher'
 import { isCommunityMappingEnabled, snapshotOf } from '@/lib/vuln-db/queries'
 import { getCommunityRecords } from '@/lib/vuln-db/store'
-import { Device, Vulnerability, RiskLevel, CommunityVulnerability } from '@/types'
+import { Device, Vulnerability, RiskLevel, CommunityVulnerability, AuthenticationStatus } from '@/types'
 import { classifyHost, DiscoveredHost, ipToInt, simulatedHostIp } from './cctv-discovery'
-import { discoverHosts, deriveChecksFromEvidence } from './network-discovery'
+import { discoverHosts, deriveChecksFromEvidence, httpAuthProbe } from './network-discovery'
+import { verifyDefaultCredential, isCredentialCheckAllowed, StoredCredential, CredCheckOutcome } from './credential-check'
+
+/** Heuristic checks that are OBSERVATIONS only — shown as informational, never scored. */
+const OBSERVATION_CHECKS = new Set([
+  'http_only', 'rtsp_exposed', 'telnet_open', 'missing_headers', 'open_ports',
+  'insecure_web', 'session_cookies', 'onvif_anonymous',
+])
+const DEF = new Map(VULNERABILITY_DEFINITIONS.map(v => [v.checkKey, v]))
 
 interface MockDeviceTemplate {
   /** Host number on the simulated site's /24 (e.g. 64 -> x.x.x.64) */
@@ -231,9 +243,21 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
   const realScan = getScannerMode() === 'real'
   const isStoppedNow = async () =>
     (await supabase.from('scans').select('status').eq('id', scanId).single()).data?.status === 'stopped'
-  const filterChecks = (checks: string[]) => {
-    const enabled = checks.filter(c => enabledSlugs.has(c))
-    return safeScanMode ? enabled.filter(c => c !== 'default_credentials') : enabled
+
+  // Informational observations only (open ports, HTTP-only, …). These are shown
+  // on the device but NEVER make it vulnerable and NEVER add to the risk score.
+  const observationChecks = (checks: string[]) =>
+    checks.filter(c => OBSERVATION_CHECKS.has(c) && enabledSlugs.has(c))
+
+  // ── Authorized default-credential verification policy ───────────────────────
+  // Active only for REAL scans, when the admin-enabled check is on, Safe Scan
+  // Mode is off, and SENTRIX_ALLOW_CRED_CHECK=1 (see credential-check.ts).
+  const credCheckEnabled = enabledSlugs.has('default_credentials')
+  const credPolicyActive = realScan && credCheckEnabled && isCredentialCheckAllowed(safeScanMode)
+  let vendorCredentials: StoredCredential[] = []
+  if (credPolicyActive) {
+    const { data } = await supabase.from('default_credentials').select('vendor, username, password, risk_level')
+    vendorCredentials = (data as StoredCredential[] | null) ?? []
   }
 
   const allDevices: (Omit<Device, 'id'> & { vulnerabilityChecks: string[] })[] = []
@@ -279,7 +303,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
         risk_level: 'secure' as RiskLevel,
         status: 'active',
         created_at: new Date().toISOString(),
-        vulnerabilityChecks: filterChecks(deriveChecksFromEvidence(c.host)),
+        vulnerabilityChecks: observationChecks(deriveChecksFromEvidence(c.host)),
       })
     }
     await supabase.from('scans').update({ total_devices: cctvIdentified }).eq('id', scanId)
@@ -337,7 +361,7 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
         risk_level: 'secure' as RiskLevel,
         status: 'active',
         created_at: new Date().toISOString(),
-        vulnerabilityChecks: filterChecks(template.vulnerability_checks),
+        vulnerabilityChecks: observationChecks(template.vulnerability_checks),
       })
     }
   }
@@ -385,30 +409,66 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     }
     const { vulnerabilityChecks, ...deviceInsert } = deviceData
 
-    const vulnDefs = VULNERABILITY_DEFINITIONS.filter(v => vulnerabilityChecks.includes(v.checkKey))
-    const matches: MatchResult[] = communityEnabled
-      ? discountOverlappingMatches(vulnDefs, matchDevice(deviceInsert, communityRecords))
-      : []
-    const riskScore = calculateRiskScoreWithMatches(vulnDefs, matches)
-    const riskLevel = getRiskLevel(riskScore)
+    // ── Step 3: known-vulnerability matching against vulnerabilities.txt ───────
+    const matches: MatchResult[] = communityEnabled ? matchDevice(deviceInsert, communityRecords) : []
+    const confirmedMatches = matches.filter(m => m.confirmed)
+    const knownStatus = knownVulnerabilityStatus(matches)
 
+    // ── Step 4: authorized default-credential verification (gated, one attempt) ─
+    let cred: CredCheckOutcome = { status: 'NOT_TESTED', reason: 'credential check not active' }
+    if (credPolicyActive) {
+      try {
+        cred = await verifyDefaultCredential(
+          { ip: deviceInsert.ip_address, vendor: deviceInsert.vendor, open_ports: deviceInsert.open_ports },
+          vendorCredentials, httpAuthProbe,
+        )
+      } catch {
+        cred = { status: 'AUTHENTICATION_ERROR', reason: 'verification threw' }
+      }
+    }
+    const credentialConfirmed = cred.status === 'CONFIRMED_DEFAULT_CREDENTIALS'
+    const authStatus: AuthenticationStatus = cred.status
+
+    // ── Step 5: risk scoring + separated status classification ─────────────────
+    // Essential checks are complete unless an active credential policy could not
+    // test this device (NOT_TESTED while the policy is active → NOT_VERIFIED).
+    const essentialChecksComplete = !(credPolicyActive && cred.status === 'NOT_TESTED')
+    const overall = getOverallSecurityStatus({ knownStatus, authStatus, essentialChecksComplete })
+    const riskScore = calculateDeviceRisk(confirmedMatches, credentialConfirmed)
+    const riskLevel = getRiskLevel(riskScore)
+    const trustScore = calculateTrustScore(riskScore)
+
+    // ── Step 6: persistence (only findings confirmed in THIS scan) ─────────────
     const { data: insertedDevice } = await supabase
       .from('devices')
-      .insert({ ...deviceInsert, risk_score: riskScore, risk_level: riskLevel })
+      .insert({
+        ...deviceInsert,
+        risk_score: riskScore,
+        risk_level: riskLevel,
+        known_vulnerability_status: knownStatus,
+        authentication_status: authStatus,
+        overall_security_status: overall,
+        trust_score: trustScore,
+      })
       .select()
       .single()
 
-    if (insertedDevice && vulnDefs.length > 0) {
-      const vulnerabilities: Omit<Vulnerability, 'id'>[] = vulnDefs.map(v => ({
-        device_id: insertedDevice.id,
-        title: v.title,
-        description: v.description,
-        severity: v.severity,
-        score: v.score,
-        recommendation: v.recommendation,
-        created_at: new Date().toISOString(),
-      }))
-      await supabase.from('vulnerabilities').insert(vulnerabilities)
+    // Informational observations (open ports, HTTP-only, …): shown, score 0.
+    const observationRows: Omit<Vulnerability, 'id'>[] = vulnerabilityChecks
+      .map(k => DEF.get(k)).filter((v): v is NonNullable<typeof v> => !!v)
+      .map(v => ({
+        device_id: insertedDevice!.id, title: v.title, description: v.description,
+        severity: v.severity, score: 0, recommendation: v.recommendation,
+        informational: true, created_at: new Date().toISOString(),
+      } as Omit<Vulnerability, 'id'>))
+    // Confirmed default-credential finding (a real, scored vulnerability).
+    const credRows: Omit<Vulnerability, 'id'>[] = credentialConfirmed ? [{
+      device_id: insertedDevice!.id, title: CREDENTIAL_FINDING.title, description: CREDENTIAL_FINDING.description,
+      severity: CREDENTIAL_FINDING.severity, score: CREDENTIAL_FINDING.score, recommendation: CREDENTIAL_FINDING.recommendation,
+      informational: false, created_at: new Date().toISOString(),
+    } as Omit<Vulnerability, 'id'>] : []
+    if (insertedDevice && (observationRows.length || credRows.length)) {
+      await supabase.from('vulnerabilities').insert([...credRows, ...observationRows])
     }
 
     if (insertedDevice && matches.length > 0) {
@@ -431,7 +491,17 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
       devicesWithMatches++
     }
 
-    if (insertedDevice && getSecurityStatus(vulnDefs.length, matches) === 'vulnerable') totalVulnerable++
+    // ── Step 10: safe diagnostic logging (never logs passwords) ────────────────
+    if (process.env.SENTRIX_SCAN_DEBUG === '1') {
+      console.log(
+        `[SentriX] ${deviceInsert.ip_address} ${deviceInsert.vendor}/${deviceInsert.model}/${deviceInsert.firmware_version} ` +
+        `| records=${communityRecords.length} matched=${confirmedMatches.length} unverified=${matches.length - confirmedMatches.length} ` +
+        `| known=${knownStatus} auth=${authStatus} overall=${overall} risk=${riskScore} trust=${trustScore}` +
+        (cred.status !== 'NOT_TESTED' ? ` | cred=${cred.reason}` : ''),
+      )
+    }
+
+    if (insertedDevice && overall === 'VULNERABLE') totalVulnerable++
     if (insertedDevice && riskLevel === 'critical') totalCritical++
 
     deviceRiskScores.push(riskScore)

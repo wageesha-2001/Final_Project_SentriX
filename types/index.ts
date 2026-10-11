@@ -51,15 +51,45 @@ export interface Device {
   risk_level: RiskLevel;
   status: string;
   created_at: string;
+  /** Persisted assessment statuses (absent on scans created before they existed). */
+  known_vulnerability_status?: KnownVulnerabilityStatus;
+  authentication_status?: AuthenticationStatus;
+  overall_security_status?: OverallSecurityStatus;
+  trust_score?: number;
 }
 
 export type SecurityStatus = 'vulnerable' | 'potential' | 'secure';
 
+// ─── Separated per-device assessment statuses ────────────────────────────────
+// Discovery, known-vulnerability matching and authentication are independent.
+
+/** Result of matching the device against data/vulnerabilities.txt. */
+export type KnownVulnerabilityStatus = 'MATCHED' | 'NO_MATCH' | 'UNVERIFIED';
+
+/** Result of the authorized default-credential verification stage. */
+export type AuthenticationStatus =
+  | 'CONFIRMED_DEFAULT_CREDENTIALS'
+  | 'AUTHENTICATION_REJECTED'
+  | 'NOT_TESTED'
+  | 'AUTHENTICATION_ERROR';
+
+/** Overall per-device classification derived from the two statuses above. */
+export type OverallSecurityStatus = 'VULNERABLE' | 'HEALTHY' | 'NOT_VERIFIED';
+
 /** Device as returned by GET /api/devices, with its security summary. */
 export interface DeviceListItem extends Device {
+  /** Confirmed findings: file matches + confirmed default credentials. */
   findings_count: number;
   community_match_count: number;
+  known_vulnerability_count: number;
+  /** Legacy tri-state kept for existing UI: vulnerable | potential | secure. */
   security_status: SecurityStatus;
+  known_vulnerability_status: KnownVulnerabilityStatus;
+  authentication_status: AuthenticationStatus;
+  overall_security_status: OverallSecurityStatus;
+  /** Observations (open ports, HTTP-only, …) that do NOT affect risk. */
+  informational_count: number;
+  trust_score: number;
   /** Found by a simulation-mode scan (built-in demo device). */
   simulated?: boolean;
 }
@@ -74,6 +104,8 @@ export interface Vulnerability {
   severity: VulnerabilitySeverity;
   score: number;
   recommendation: string;
+  /** Observation only (open port, HTTP-only, …): shown but excluded from risk/status. */
+  informational?: boolean;
   created_at: string;
 }
 
