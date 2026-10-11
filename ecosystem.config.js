@@ -13,11 +13,13 @@ module.exports = {
         NODE_ENV: 'production',
         PORT: 3000,
         SENTRIX_REAL_SCAN: '1',
+        SENTRIX_ALLOW_LOCAL_DB: '1',
       },
       env_production: {
         NODE_ENV: 'production',
         PORT: 3000,
         SENTRIX_REAL_SCAN: '1',
+        SENTRIX_ALLOW_LOCAL_DB: '1',
       },
       error_file: './logs/pm2-error.log',
       out_file: './logs/pm2-out.log',
