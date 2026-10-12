@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS devices (
   status TEXT DEFAULT 'active',
   -- Separated per-device assessment statuses (computed at scan time)
   known_vulnerability_status TEXT CHECK (known_vulnerability_status IN ('MATCHED', 'NO_MATCH', 'UNVERIFIED')),
-  authentication_status TEXT CHECK (authentication_status IN ('CONFIRMED_DEFAULT_CREDENTIALS', 'AUTHENTICATION_REJECTED', 'NOT_TESTED', 'AUTHENTICATION_ERROR')),
+  authentication_status TEXT CHECK (authentication_status IN ('CONFIRMED_DEFAULT_CREDENTIALS', 'CONFIRMED_WEAK_PASSWORD', 'AUTHENTICATION_REJECTED', 'NOT_TESTED', 'AUTHENTICATION_ERROR')),
   overall_security_status TEXT CHECK (overall_security_status IN ('VULNERABLE', 'HEALTHY', 'NOT_VERIFIED')),
   trust_score INT DEFAULT 100 CHECK (trust_score >= 0 AND trust_score <= 100),
   created_at TIMESTAMPTZ DEFAULT NOW()

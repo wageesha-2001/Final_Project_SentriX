@@ -1,24 +1,36 @@
 /**
- * Authorized default-credential verification (ACTIVE check).
+ * Authorized credential verification (ACTIVE check).
  *
- * This is the ONLY module that sends authentication traffic to a device. It is
- * deliberately conservative and must only ever run against equipment the
- * operator is explicitly authorized to audit:
+ * This is the ONLY module that sends authentication traffic to a device. It must
+ * only ever run against equipment the operator is explicitly authorized to audit.
  *
- *   - Disabled by default. Runs only when SENTRIX_ALLOW_CRED_CHECK=1 AND the
- *     scan is not in Safe Scan Mode AND the admin-enabled check is on.
- *   - ONE verification attempt per device, using a single vendor-matched
- *     credential (the highest-risk entry for that exact vendor). It does NOT
- *     cycle through every stored password and does NOT try other vendors.
- *   - Stops immediately on lockout / throttling / service error (never retries).
- *   - Uses a reliable success signal: a protected endpoint that answers 401
- *     unauthenticated and 2xx only when the credential is accepted. A bare 200
- *     from a login page is NOT treated as success.
- *   - NEVER logs, stores, returns or reports the password. Only the vendor and
- *     username are surfaced, and only for a confirmed finding.
+ * WHAT IT CHECKS
+ *   For each discovered CCTV device it tests whether the device accepts:
+ *     1. a known FACTORY DEFAULT credential for its exact vendor (from the
+ *        Default Credentials database), then
+ *     2. a common WEAK password (built-in list) for the usual admin usernames.
+ *   The first accepted credential wins and testing stops.
  *
- * It is written against an injectable HTTP probe so it is unit-testable without
- * touching a network.
+ * RESULTS (authentication_status)
+ *   CONFIRMED_DEFAULT_CREDENTIALS - a factory default worked        (Critical)
+ *   CONFIRMED_WEAK_PASSWORD       - a weak/common password worked   (Low)
+ *   AUTHENTICATION_REJECTED       - nothing worked                  (good)
+ *   NOT_TESTED                    - no interface / nothing to try
+ *   AUTHENTICATION_ERROR          - timeout / lockout / service error
+ *
+ * SAFETY (non-negotiable)
+ *   - Runs only on a REAL scan with Safe Scan Mode OFF and the check enabled.
+ *   - Tries the full candidate set but STOPS IMMEDIATELY on any lockout /
+ *     throttling signal (HTTP 429/403/503) so it cannot keep hammering an
+ *     account. Testing many passwords can still lock out real accounts — this is
+ *     an authorized-lab feature.
+ *   - Reliable success signal: a protected endpoint that answers 401
+ *     unauthenticated and 2xx only when a credential is accepted. A 200 login
+ *     page is NOT success.
+ *   - NEVER logs, stores, returns or reports a password. Only vendor + username
+ *     (and whether it was a default or a weak password) are surfaced.
+ *
+ * Written against an injectable HTTP probe so it is unit-testable without a network.
  */
 import crypto from 'crypto'
 import type { AuthenticationStatus } from '@/types'
@@ -58,8 +70,19 @@ export interface CredCheckOutcome {
   /** Safe-to-log explanation. Never contains a password. */
   reason: string
   /** Present only for a CONFIRMED finding; never includes the password. */
-  attempted?: { vendor: string; username: string }
+  attempted?: { vendor: string; username: string; kind: 'default' | 'weak' }
+  /** How many login attempts were sent (for diagnostics; no secrets). */
+  attempts: number
 }
+
+/** Common weak / easily guessed passwords (NOT vendor-specific). */
+export const WEAK_PASSWORDS = [
+  '12345', '123456', '1234', '12345678', '123456789', '111111', '000000',
+  'password', 'admin', 'root', 'pass', 'default', '1111', '888888', '666666',
+  '54321', 'admin123', '123123', 'qwerty', 'abc123',
+]
+/** Usernames weak passwords are tried against when the vendor list gives none. */
+const FALLBACK_USERNAMES = ['admin', 'root']
 
 /** Protected endpoints that return 401 unauthenticated on each vendor's web UI. */
 const PROTECTED_PATHS: { vendor: RegExp; path: string }[] = [
@@ -69,22 +92,23 @@ const PROTECTED_PATHS: { vendor: RegExp; path: string }[] = [
   { vendor: /.*/, path: '/onvif/device_service' },
 ]
 
+/** On by default for real scans; disabled whenever Safe Scan Mode is on. */
 export function isCredentialCheckAllowed(safeScanMode: boolean): boolean {
-  return process.env.SENTRIX_ALLOW_CRED_CHECK === '1' && !safeScanMode
+  return !safeScanMode
 }
 
-/** Pick ONE credential for this exact vendor: highest risk first, deterministic. */
-export function selectVendorCredential(vendor: string, creds: StoredCredential[]): StoredCredential | null {
+/** All stored credentials for this exact vendor, highest risk first, de-duplicated. */
+export function selectVendorCredentials(vendor: string, creds: StoredCredential[]): StoredCredential[] {
   const RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3 }
   const v = vendor.trim().toLowerCase()
-  const matches = creds.filter(c => c.vendor.trim().toLowerCase() === v)
-  if (matches.length === 0) return null
-  return [...matches].sort(
-    (a, b) =>
+  const seen = new Set<string>()
+  return creds
+    .filter(c => c.vendor.trim().toLowerCase() === v)
+    .filter(c => { const k = `${c.username}\u0000${c.password}`; if (seen.has(k)) return false; seen.add(k); return true })
+    .sort((a, b) =>
       (RANK[a.risk_level] ?? 9) - (RANK[b.risk_level] ?? 9) ||
       a.username.localeCompare(b.username) ||
-      a.password.localeCompare(b.password),
-  )[0]
+      a.password.localeCompare(b.password))
 }
 
 function basicHeader(username: string, password: string): string {
@@ -92,13 +116,7 @@ function basicHeader(username: string, password: string): string {
 }
 
 /** Build a single Digest (MD5, qop=auth) Authorization header from a challenge. */
-function digestHeader(
-  challenge: string,
-  method: string,
-  uri: string,
-  username: string,
-  password: string,
-): string | null {
+function digestHeader(challenge: string, method: string, uri: string, username: string, password: string): string | null {
   const get = (k: string) => new RegExp(`${k}="?([^",]+)"?`, 'i').exec(challenge)?.[1]
   const realm = get('realm')
   const nonce = get('nonce')
@@ -110,75 +128,84 @@ function digestHeader(
   const ha2 = md5(`${method}:${uri}`)
   const cnonce = crypto.randomBytes(8).toString('hex')
   const nc = '00000001'
-  const response = qop
-    ? md5(`${ha1}:${nonce}:${nc}:${cnonce}:auth:${ha2}`)
-    : md5(`${ha1}:${nonce}:${ha2}`)
+  const response = qop ? md5(`${ha1}:${nonce}:${nc}:${cnonce}:auth:${ha2}`) : md5(`${ha1}:${nonce}:${ha2}`)
   let h = `Digest username="${username}", realm="${realm}", nonce="${nonce}", uri="${uri}", response="${response}"`
   if (qop) h += `, qop=auth, nc=${nc}, cnonce="${cnonce}"`
   if (opaque) h += `, opaque="${opaque}"`
   return h
 }
 
-/** A 2xx on the protected path means the credential was accepted. */
 const isAuthSuccess = (status: number) => status >= 200 && status < 300
-/** Lockout / throttling signals — stop, never retry. */
-const isLockout = (status: number) => status === 429 || status === 503
+/** Lockout / throttling / forbidden signals — stop, never keep trying. */
+const isLockout = (status: number) => status === 429 || status === 403 || status === 503
 
 /**
- * Perform at most ONE authorized credential verification against a device.
- * Returns NOT_TESTED when the check is not allowed, no credential exists for the
- * vendor, or no supported management interface is reachable.
+ * Perform an authorized credential audit against one device: all vendor default
+ * credentials, then common weak passwords, stopping on the first success or any
+ * lockout signal. Returns NOT_TESTED when there is nothing to try or no
+ * supported management interface is reachable.
  */
-export async function verifyDefaultCredential(
+export async function verifyCredentials(
   input: CredCheckInput,
-  creds: StoredCredential[],
+  defaultCreds: StoredCredential[],
   probe: AuthProbe,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; weakPasswords?: string[] } = {},
 ): Promise<CredCheckOutcome> {
   const timeoutMs = opts.timeoutMs ?? 2500
-  const cred = selectVendorCredential(input.vendor, creds)
-  if (!cred) return { status: 'NOT_TESTED', reason: `no stored credential for vendor "${input.vendor}"` }
+  const weakList = opts.weakPasswords ?? WEAK_PASSWORDS
+  const vendorDefaults = selectVendorCredentials(input.vendor, defaultCreds)
 
   const ports = new Set(input.open_ports.map(p => p.port))
   const tls = ports.has(443) ? true : ports.has(80) || ports.has(8080) ? false : null
   const port = ports.has(443) ? 443 : ports.has(80) ? 80 : ports.has(8080) ? 8080 : null
-  if (tls === null || port === null) {
-    return { status: 'NOT_TESTED', reason: 'no HTTP(S) management interface open' }
-  }
+  if (tls === null || port === null) return { status: 'NOT_TESTED', reason: 'no HTTP(S) management interface open', attempts: 0 }
 
   const path = (PROTECTED_PATHS.find(p => p.vendor.test(input.vendor)) ?? PROTECTED_PATHS[PROTECTED_PATHS.length - 1]).path
 
-  // 1) Unauthenticated probe: establish that this endpoint actually requires auth.
+  // 1) Unauthenticated probe: confirm this endpoint actually requires auth.
   const unauth = await probe({ ip: input.ip, port, tls, path, timeoutMs })
-  if (!unauth) return { status: 'AUTHENTICATION_ERROR', reason: 'no response from management interface' }
-  if (isLockout(unauth.status)) return { status: 'AUTHENTICATION_ERROR', reason: `throttled (HTTP ${unauth.status})` }
-  if (isAuthSuccess(unauth.status)) {
-    // Endpoint open without auth → cannot conclude anything about credentials.
-    return { status: 'NOT_TESTED', reason: 'management endpoint does not require authentication' }
-  }
-  if (unauth.status !== 401 && unauth.status !== 403) {
-    return { status: 'NOT_TESTED', reason: `unsupported auth interface (HTTP ${unauth.status})` }
-  }
+  if (!unauth) return { status: 'AUTHENTICATION_ERROR', reason: 'no response from management interface', attempts: 0 }
+  if (isLockout(unauth.status)) return { status: 'AUTHENTICATION_ERROR', reason: `throttled (HTTP ${unauth.status})`, attempts: 0 }
+  if (isAuthSuccess(unauth.status)) return { status: 'NOT_TESTED', reason: 'management endpoint does not require authentication', attempts: 0 }
+  if (unauth.status !== 401) return { status: 'NOT_TESTED', reason: `unsupported auth interface (HTTP ${unauth.status})`, attempts: 0 }
 
-  // 2) ONE authenticated attempt, matching the server's advertised scheme.
-  const scheme = (unauth.wwwAuthenticate ?? '').toLowerCase()
-  const authorization = scheme.startsWith('digest')
-    ? digestHeader(unauth.wwwAuthenticate!, 'GET', path, cred.username, cred.password)
-    : basicHeader(cred.username, cred.password)
-  if (!authorization) return { status: 'AUTHENTICATION_ERROR', reason: 'could not build auth challenge response' }
+  const challenge = unauth.wwwAuthenticate ?? ''
+  const buildAuth = (u: string, p: string) =>
+    challenge.toLowerCase().startsWith('digest') ? digestHeader(challenge, 'GET', path, u, p) : basicHeader(u, p)
 
-  const authed = await probe({ ip: input.ip, port, tls, path, authorization, timeoutMs })
-  if (!authed) return { status: 'AUTHENTICATION_ERROR', reason: 'no response to authenticated request' }
-  if (isLockout(authed.status)) return { status: 'AUTHENTICATION_ERROR', reason: `lockout/throttle (HTTP ${authed.status})` }
-  if (isAuthSuccess(authed.status)) {
-    return {
-      status: 'CONFIRMED_DEFAULT_CREDENTIALS',
-      reason: `default credential accepted for user "${cred.username}"`,
-      attempted: { vendor: cred.vendor, username: cred.username },
+  // Build the ordered candidate list: vendor defaults first, then weak passwords
+  // against the admin usernames. De-duplicate identical (username,password) pairs.
+  type Cand = { username: string; password: string; kind: 'default' | 'weak' }
+  const tried = new Set<string>()
+  const candidates: Cand[] = []
+  const add = (username: string, password: string, kind: 'default' | 'weak') => {
+    const key = `${username}\u0000${password}`
+    if (tried.has(key)) return
+    tried.add(key); candidates.push({ username, password, kind })
+  }
+  for (const c of vendorDefaults) add(c.username, c.password, 'default')
+  const usernames = vendorDefaults.length > 0 ? Array.from(new Set(vendorDefaults.map(c => c.username))) : FALLBACK_USERNAMES
+  for (const u of usernames) for (const pw of weakList) add(u, pw, 'weak')
+
+  let attempts = 0
+  for (const cand of candidates) {
+    const authorization = buildAuth(cand.username, cand.password)
+    if (!authorization) continue // challenge could not be built for this scheme
+    attempts++
+    const res = await probe({ ip: input.ip, port, tls, path, authorization, timeoutMs })
+    if (!res) return { status: 'AUTHENTICATION_ERROR', reason: 'no response during verification', attempts }
+    if (isLockout(res.status)) return { status: 'AUTHENTICATION_ERROR', reason: `lockout/throttle after ${attempts} attempt(s) (HTTP ${res.status})`, attempts }
+    if (isAuthSuccess(res.status)) {
+      return {
+        status: cand.kind === 'default' ? 'CONFIRMED_DEFAULT_CREDENTIALS' : 'CONFIRMED_WEAK_PASSWORD',
+        reason: cand.kind === 'default'
+          ? `default credential accepted for user "${cand.username}"`
+          : `weak password accepted for user "${cand.username}"`,
+        attempted: { vendor: input.vendor, username: cand.username, kind: cand.kind },
+        attempts,
+      }
     }
+    // 401 → wrong credential, keep going
   }
-  if (authed.status === 401 || authed.status === 403) {
-    return { status: 'AUTHENTICATION_REJECTED', reason: `credential rejected (HTTP ${authed.status})` }
-  }
-  return { status: 'AUTHENTICATION_ERROR', reason: `unexpected response (HTTP ${authed.status})` }
+  return { status: 'AUTHENTICATION_REJECTED', reason: `all ${attempts} credential(s) rejected`, attempts }
 }

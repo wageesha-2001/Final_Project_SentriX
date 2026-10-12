@@ -202,33 +202,49 @@ export function calculateTrustScore(riskScore: number): number {
 
 // ─── Confirmed-finding risk & separated classification ───────────────────────
 
-/** Risk contribution of a confirmed default-credential finding. */
+/** Risk contribution of a confirmed default-credential finding (factory default). */
 export const CREDENTIAL_FINDING = {
   title: 'Default Credentials Confirmed',
   description: 'An authorized verification confirmed the device accepts factory-default credentials.',
   severity: 'critical' as const,
-  score: 35,
+  // A working default admin login is full compromise -> Critical device risk band.
+  score: 75,
   recommendation: 'Change the default credentials immediately and set a strong, unique password.',
 }
 
+/** Risk contribution of a confirmed WEAK/common (non-default) password. */
+export const WEAK_PASSWORD_FINDING = {
+  title: 'Weak / Common Password Accepted',
+  description: 'An authorized verification confirmed the device accepts a weak, easily guessed password (not a factory default).',
+  severity: 'low' as const,
+  score: 8,
+  recommendation: 'Set a strong, unique password that is not a common or easily guessed value.',
+}
+
+/** True when an authentication status represents a confirmed credential weakness. */
+export function isCredentialConfirmed(authStatus: AuthenticationStatus): boolean {
+  return authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS' || authStatus === 'CONFIRMED_WEAK_PASSWORD'
+}
+
 /**
- * Device risk from CONFIRMED findings only. Confirmed vulnerabilities.txt
+ * Device risk from CONFIRMED findings only: confirmed vulnerabilities.txt
  * matches (risk_score_added already confidence-scaled) plus a confirmed
- * default-credential finding. Unverified/informational items contribute 0.
- * The same credential weakness is not double-counted. Capped at 100.
+ * credential finding — Critical (35) for factory defaults, Low (8) for a weak
+ * password. Unverified/informational items contribute 0. Capped at 100.
  */
 export function calculateDeviceRisk(
   confirmedMatches: { risk_score_added: number }[],
-  credentialConfirmed: boolean,
+  authStatus: AuthenticationStatus,
 ): number {
   const fromMatches = confirmedMatches.reduce((sum, m) => sum + m.risk_score_added, 0)
-  const fromCreds = credentialConfirmed ? CREDENTIAL_FINDING.score : 0
+  const fromCreds = authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS' ? CREDENTIAL_FINDING.score
+    : authStatus === 'CONFIRMED_WEAK_PASSWORD' ? WEAK_PASSWORD_FINDING.score : 0
   return Math.min(fromMatches + fromCreds, 100)
 }
 
 /**
  * Overall per-device status from the two independent assessments.
- *   VULNERABLE    — a confirmed file match OR confirmed default credentials.
+ *   VULNERABLE    — a confirmed file match OR confirmed default/weak credentials.
  *   NOT_VERIFIED  — no confirmed finding, but an essential check could not be
  *                   completed (unverified firmware match, auth error, or an
  *                   auth test required by policy that did not run).
@@ -240,7 +256,7 @@ export function getOverallSecurityStatus(args: {
   essentialChecksComplete: boolean
 }): OverallSecurityStatus {
   const { knownStatus, authStatus, essentialChecksComplete } = args
-  if (knownStatus === 'MATCHED' || authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS') return 'VULNERABLE'
+  if (knownStatus === 'MATCHED' || isCredentialConfirmed(authStatus)) return 'VULNERABLE'
   if (knownStatus === 'UNVERIFIED' || authStatus === 'AUTHENTICATION_ERROR' || !essentialChecksComplete) {
     return 'NOT_VERIFIED'
   }

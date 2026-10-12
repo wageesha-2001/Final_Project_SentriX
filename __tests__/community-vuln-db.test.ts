@@ -321,7 +321,8 @@ describe('vulnerability store', () => {
   it('falls back to local data when GitHub is unavailable', async () => {
     mockFetch('', false, 404)
     const summary = await store.syncRemote(db, 'u1')
-    expect(summary.message).toBe('Remote vulnerability database is unavailable. Local data will be used.')
+    expect(summary.message).toMatch(/^Remote vulnerability database is unavailable\. Local data will be used\./)
+    expect(summary.message).toContain('COMMUNITY_VULN_DB_GITHUB_TOKEN') // 404 hints at a private repo
     expect(summary.fell_back_to_local).toBe(true)
     expect(await actions()).toContain('vuln_db_github_sync_failed')
     process.env.COMMUNITY_VULN_DB_SYNC_MODE = 'remote'
@@ -330,7 +331,27 @@ describe('vulnerability store', () => {
 
   it('treats a network timeout as remote unavailable', async () => {
     global.fetch = jest.fn().mockRejectedValue(Object.assign(new Error('aborted'), { name: 'AbortError' })) as unknown as typeof fetch
-    expect((await store.syncRemote(db, 'u1')).message).toBe('Remote vulnerability database is unavailable. Local data will be used.')
+    expect((await store.syncRemote(db, 'u1')).message).toBe('Remote vulnerability database is unavailable. Local data will be used. Reason: Request timed out')
+  })
+
+  it('converts a github.com blob link to the raw link', async () => {
+    process.env.COMMUNITY_VULN_DB_REMOTE_URL = 'https://github.com/someone/repo/blob/POC-ready/data/vulnerabilities.txt'
+    mockFetch(toText(record({ id: 'REMOTE-0001' })))
+    expect((await store.syncRemote(db, 'u1')).status).toBe('success')
+    expect(global.fetch).toHaveBeenCalledWith('https://raw.githubusercontent.com/someone/repo/POC-ready/data/vulnerabilities.txt', expect.anything())
+  })
+
+  it('sends the GitHub token for private repos', async () => {
+    process.env.COMMUNITY_VULN_DB_GITHUB_TOKEN = 'test-token'
+    try {
+      mockFetch(toText(record({ id: 'REMOTE-0001' })))
+      await store.syncRemote(db, 'u1')
+      expect(global.fetch).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: 'token test-token' }),
+      }))
+    } finally {
+      delete process.env.COMMUNITY_VULN_DB_GITHUB_TOKEN
+    }
   })
 
   it('only allows https raw.githubusercontent.com URLs', async () => {
@@ -339,7 +360,7 @@ describe('vulnerability store', () => {
       global.fetch = jest.fn() as unknown as typeof fetch
       const summary = await store.syncRemote(db, 'u1')
       expect(global.fetch).not.toHaveBeenCalled()
-      expect(summary.message).toBe('Remote vulnerability database is unavailable. Local data will be used.')
+      expect(summary.message).toMatch(/^Remote vulnerability database is unavailable\. Local data will be used\./)
     }
   })
 

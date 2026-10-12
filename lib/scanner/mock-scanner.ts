@@ -2,7 +2,7 @@ import { createServerSupabase } from '@/lib/supabase/server'
 import {
   getRiskLevel, VULNERABILITY_DEFINITIONS, getOverallScanRisk,
   calculateDeviceRisk, calculateTrustScore, getOverallSecurityStatus, overallToSecurityStatus,
-  CREDENTIAL_FINDING,
+  isCredentialConfirmed, CREDENTIAL_FINDING, WEAK_PASSWORD_FINDING,
 } from '@/lib/risk/calculator'
 import { matchDevice, MatchResult, knownVulnerabilityStatus } from '@/lib/vuln-db/matcher'
 import { isCommunityMappingEnabled, snapshotOf } from '@/lib/vuln-db/queries'
@@ -10,7 +10,7 @@ import { getCommunityRecords } from '@/lib/vuln-db/store'
 import { Device, Vulnerability, RiskLevel, CommunityVulnerability, AuthenticationStatus } from '@/types'
 import { classifyHost, DiscoveredHost, ipToInt, simulatedHostIp } from './cctv-discovery'
 import { discoverHosts, deriveChecksFromEvidence, httpAuthProbe } from './network-discovery'
-import { verifyDefaultCredential, isCredentialCheckAllowed, StoredCredential, CredCheckOutcome } from './credential-check'
+import { verifyCredentials, isCredentialCheckAllowed, StoredCredential, CredCheckOutcome } from './credential-check'
 
 /** Heuristic checks that are OBSERVATIONS only — shown as informational, never scored. */
 const OBSERVATION_CHECKS = new Set([
@@ -249,9 +249,10 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
   const observationChecks = (checks: string[]) =>
     checks.filter(c => OBSERVATION_CHECKS.has(c) && enabledSlugs.has(c))
 
-  // ── Authorized default-credential verification policy ───────────────────────
-  // Active only for REAL scans, when the admin-enabled check is on, Safe Scan
-  // Mode is off, and SENTRIX_ALLOW_CRED_CHECK=1 (see credential-check.ts).
+  // ── Authorized credential verification policy ───────────────────────────────
+  // Runs on REAL scans when the admin-enabled check is on and Safe Scan Mode is
+  // off. It tries vendor default credentials AND common weak passwords, stopping
+  // on lockout. See credential-check.ts. (Off automatically in simulation.)
   const credCheckEnabled = enabledSlugs.has('default_credentials')
   const credPolicyActive = realScan && credCheckEnabled && isCredentialCheckAllowed(safeScanMode)
   let vendorCredentials: StoredCredential[] = []
@@ -414,27 +415,27 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
     const confirmedMatches = matches.filter(m => m.confirmed)
     const knownStatus = knownVulnerabilityStatus(matches)
 
-    // ── Step 4: authorized default-credential verification (gated, one attempt) ─
-    let cred: CredCheckOutcome = { status: 'NOT_TESTED', reason: 'credential check not active' }
+    // ── Step 4: authorized credential verification (default creds + weak passwords) ─
+    let cred: CredCheckOutcome = { status: 'NOT_TESTED', reason: 'credential check not active', attempts: 0 }
     if (credPolicyActive) {
       try {
-        cred = await verifyDefaultCredential(
+        cred = await verifyCredentials(
           { ip: deviceInsert.ip_address, vendor: deviceInsert.vendor, open_ports: deviceInsert.open_ports },
           vendorCredentials, httpAuthProbe,
         )
       } catch {
-        cred = { status: 'AUTHENTICATION_ERROR', reason: 'verification threw' }
+        cred = { status: 'AUTHENTICATION_ERROR', reason: 'verification threw', attempts: 0 }
       }
     }
-    const credentialConfirmed = cred.status === 'CONFIRMED_DEFAULT_CREDENTIALS'
     const authStatus: AuthenticationStatus = cred.status
+    const credentialConfirmed = isCredentialConfirmed(authStatus)
 
     // ── Step 5: risk scoring + separated status classification ─────────────────
     // Essential checks are complete unless an active credential policy could not
     // test this device (NOT_TESTED while the policy is active → NOT_VERIFIED).
     const essentialChecksComplete = !(credPolicyActive && cred.status === 'NOT_TESTED')
     const overall = getOverallSecurityStatus({ knownStatus, authStatus, essentialChecksComplete })
-    const riskScore = calculateDeviceRisk(confirmedMatches, credentialConfirmed)
+    const riskScore = calculateDeviceRisk(confirmedMatches, authStatus)
     const riskLevel = getRiskLevel(riskScore)
     const trustScore = calculateTrustScore(riskScore)
 
@@ -461,10 +462,13 @@ export async function runMockScan(scanId: string, networkRange: string, safeScan
         severity: v.severity, score: 0, recommendation: v.recommendation,
         informational: true, created_at: new Date().toISOString(),
       } as Omit<Vulnerability, 'id'>))
-    // Confirmed default-credential finding (a real, scored vulnerability).
-    const credRows: Omit<Vulnerability, 'id'>[] = credentialConfirmed ? [{
-      device_id: insertedDevice!.id, title: CREDENTIAL_FINDING.title, description: CREDENTIAL_FINDING.description,
-      severity: CREDENTIAL_FINDING.severity, score: CREDENTIAL_FINDING.score, recommendation: CREDENTIAL_FINDING.recommendation,
+    // Confirmed credential finding (a real, scored vulnerability): Critical for a
+    // factory default, Low for a weak/common password.
+    const credFinding = authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS' ? CREDENTIAL_FINDING
+      : authStatus === 'CONFIRMED_WEAK_PASSWORD' ? WEAK_PASSWORD_FINDING : null
+    const credRows: Omit<Vulnerability, 'id'>[] = credFinding ? [{
+      device_id: insertedDevice!.id, title: credFinding.title, description: credFinding.description,
+      severity: credFinding.severity, score: credFinding.score, recommendation: credFinding.recommendation,
       informational: false, created_at: new Date().toISOString(),
     } as Omit<Vulnerability, 'id'>] : []
     if (insertedDevice && (observationRows.length || credRows.length)) {

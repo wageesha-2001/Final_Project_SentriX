@@ -60,8 +60,10 @@ set of built-in demo devices.
    from printers, PCs, routers, etc. (see section 5).
  * Vulnerability matching - each device is compared to records in a plain-text
    database (data/vulnerabilities.txt) by EXACT model + firmware (see section 6).
- * Authorised default-credential check - optional, lab-gated, ONE attempt per
-   device, never stores passwords (see section 8).
+ * Authorised credential check - on real scans (Safe Scan Mode off): tries
+   vendor default credentials AND common weak passwords, stops on lockout,
+   never stores passwords (see section 8). Default creds -> Critical;
+   weak password -> Low.
  * Risk & trust scoring - per device (0-100) and overall network rating.
  * Separated statuses - Known-Vulnerability / Authentication / Overall status
    so a device is never "vulnerable" just because a port is open.
@@ -226,30 +228,37 @@ Full schema: data/vulnerability-schema.md
 There is a separate list of known factory default usernames/passwords per
 vendor (the "default_credentials" table / list). It is ADMIN ONLY.
 
-The authorised credential check (lib/scanner/credential-check.ts) is a REAL
-login attempt and is therefore switched OFF by default. It runs only when ALL
-of these are true:
-   * the scan is a REAL scan (SENTRIX_REAL_SCAN=1), and
-   * SENTRIX_ALLOW_CRED_CHECK=1 is set, and
+The authorised credential check (lib/scanner/credential-check.ts) makes REAL
+login attempts. It runs automatically on REAL scans when BOTH:
    * Safe Scan Mode is OFF (Settings), and
    * the "Default Credentials Check" is enabled (Vulnerability Checks).
+It is always OFF in simulation mode. (The optional SENTRIX_ALLOW_CRED_CHECK
+env flag from earlier builds is no longer required.)
 
-What it does, conservatively:
-   * ONE attempt per device, using a SINGLE vendor-matched credential
-     (highest-risk entry for that exact vendor). No cycling through passwords,
-     no trying other vendors' credentials.
+What it tests, per device:
+   1. Every FACTORY DEFAULT credential stored for the device's exact vendor
+      (highest-risk first). No other vendor's credentials are tried.
+   2. Then a built-in list of common WEAK passwords (12345678, password,
+      admin, qwerty, 00000000, ...) against the admin usernames.
+   The first credential that works wins and testing stops.
+
+Safety:
    * Reliable success signal: a protected page that returns 401 when
-     unauthenticated and 2xx only when the credential is accepted. A 200 login
+     unauthenticated and 2xx only when a credential is accepted. A 200 login
      page is NOT treated as success.
-   * Stops immediately on lockout/throttling (HTTP 429/503).
-   * NEVER logs, stores, returns or displays the password.
+   * STOPS IMMEDIATELY on any lockout/throttling signal (HTTP 429/403/503).
+   * NEVER logs, stores, returns or displays a password - only the vendor and
+     username (and whether it was a default or weak password).
+   WARNING: trying many passwords can lock out real accounts. This is an
+   authorised-lab feature; keep Safe Scan Mode ON for production networks.
 
 Possible results (authentication_status):
-   CONFIRMED_DEFAULT_CREDENTIALS - login succeeded -> creates a High/Critical
-                                   finding -> device VULNERABLE.
-   AUTHENTICATION_REJECTED       - attempt refused -> no credential finding.
-   NOT_TESTED                    - no stored credential / no web interface /
-                                   check not active.
+   CONFIRMED_DEFAULT_CREDENTIALS - a factory default worked -> Critical finding
+                                   -> device VULNERABLE (Critical).
+   CONFIRMED_WEAK_PASSWORD       - a weak/common password worked -> Low finding
+                                   -> device VULNERABLE (Low).
+   AUTHENTICATION_REJECTED       - all attempts refused -> no credential finding.
+   NOT_TESTED                    - no web interface / check not active.
    AUTHENTICATION_ERROR          - timeout, lockout or service error.
 
 
@@ -266,12 +275,14 @@ Risk level from score: 0 secure, 1-20 low, 21-45 medium, 46-70 high, 71-100 crit
 Each device has THREE separate statuses:
    known_vulnerability_status : MATCHED | NO_MATCH | UNVERIFIED
    authentication_status      : CONFIRMED_DEFAULT_CREDENTIALS |
+                                CONFIRMED_WEAK_PASSWORD |
                                 AUTHENTICATION_REJECTED | NOT_TESTED |
                                 AUTHENTICATION_ERROR
    overall_security_status    : VULNERABLE | HEALTHY | NOT_VERIFIED
 
 Overall rules:
-   VULNERABLE   - a confirmed file match OR confirmed default credentials.
+   VULNERABLE   - a confirmed file match OR confirmed default/weak credentials.
+                  (Default credentials -> Critical risk; weak password -> Low.)
    NOT_VERIFIED - no confirmed finding, but a needed check could not complete
                   (unknown firmware on a matched model, auth error, or an
                   auth test required by policy that could not run).
@@ -336,8 +347,9 @@ Scanning behaviour:
                               (built-in demo devices).
    SENTRIX_SCAN_DEBUG=1       Print per-device discovery + classification lines
                               to the server log.
-   SENTRIX_ALLOW_CRED_CHECK=1 Allow the authorised default-credential login
-                              check (real scan + Safe Scan Mode off also needed).
+   SENTRIX_ALLOW_CRED_CHECK   Deprecated / optional. The credential check now
+                              runs on real scans whenever Safe Scan Mode is OFF
+                              and the check is enabled; this flag is not required.
 
 Database selection:
    NEXT_PUBLIC_SUPABASE_URL        Supabase project URL. If missing/placeholder,
@@ -601,9 +613,9 @@ cases, the credential check, risk scoring, reports and API routes.
      like "DS-2CD2*" and "Models: *" never match. Add the exact model, reload.
 
  Credential check never runs:
-     Needs a REAL scan + SENTRIX_ALLOW_CRED_CHECK=1 + Safe Scan Mode OFF +
-     the Default Credentials Check enabled + a stored credential for that
-     vendor + an open web interface.
+     Needs a REAL scan + Safe Scan Mode OFF + the Default Credentials Check
+     enabled + an open web interface on the device. In simulation mode it never
+     runs. Keep Safe Scan Mode ON for production networks to avoid lockouts.
 
  Vulnerability DB edits not showing:
      Click "Reload local file", or run a new scan (the file is re-read on

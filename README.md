@@ -11,9 +11,11 @@ SentriX is a full-stack cybersecurity dashboard for automated IP CCTV network se
 - **Real network discovery** — Live, non-intrusive probing of the entered range (TCP connect, RTSP `OPTIONS`, unauthenticated HTTP). No logins, no brute force, no exploits. A simulation mode with demo devices is still available.
 - **Evidence-based CCTV identification** — A weighted classifier separates IP cameras, NVRs and DVRs from other hosts (printers, PCs, routers) and keeps only CCTV devices. Vendor, model and device type are read from what the device itself exposes, e.g. Hikvision `App-webs` and its login page.
 - **Reliable sweeps** — Ports that don't answer are re-checked with a longer timeout, so one dropped packet doesn't lose a device or a port.
-- **Vulnerability detection** — HTTP-only interfaces, exposed RTSP, Telnet, missing security headers, risky open ports and more (simulation mode also covers default credentials and firmware checks).
+- **Vulnerability detection** — A device is flagged **VULNERABLE** only when its **exact model + firmware** matches a record in `data/vulnerabilities.txt`, or an authorised default-credential check confirms a login. Open ports, HTTP-only, RTSP, Telnet, missing headers, etc. are kept as **informational observations** that do not add risk (see "Vulnerability Detection Model" below).
+- **Authorised default-credential check** — Optional, lab-gated, **one** attempt per device, vendor-matched, never stores passwords.
+- **Separated per-device statuses** — Known-Vulnerability, Authentication and Overall status are tracked independently, so a device is never "vulnerable" just because a port is open.
 - **Community vulnerability database** — Maps devices to a plain-text, community-maintained knowledge base of CCTV weaknesses that can be synced from GitHub (see below).
-- **Risk scoring** — Per-device risk (0–100) and an overall network rating. Each weakness is counted once, even when a built-in check and a database record both describe it.
+- **Risk scoring** — Per-device risk (0–100) from confirmed findings only, plus a trust score (100 − risk) and an overall network rating.
 - **Device inventory** — Each device is listed once, using its most recent completed scan. The dashboard, Devices page, scan results and reports all agree.
 - **Professional reports** — HTML reports with an executive summary that separates confirmed from potential critical issues, key findings and remediation steps.
 - **Role-based access** — Admin and Technician roles with JWT authentication, server-side logout and account lockout.
@@ -35,7 +37,7 @@ SentriX is a full-stack cybersecurity dashboard for automated IP CCTV network se
 | Forms | React Hook Form + Zod |
 | Charts | Recharts |
 | Notifications | react-hot-toast |
-| Testing | Jest (251 tests) + ESLint |
+| Testing | Jest (281 tests) + ESLint |
 
 ---
 
@@ -71,6 +73,8 @@ npm install
 | `database/migrate_community_vulnerabilities.sql` | Community vulnerability matches table |
 | `database/migrate_default_credentials.sql` | Full vendor default-credential list |
 | `database/migrate_revoked_tokens.sql` | `revoked_tokens` table, needed for server-side logout |
+| `database/migrate_scan_mode.sql` | `scan_mode` column (real vs simulated) |
+| `database/migrate_device_status.sql` | Per-device `known_vulnerability_status`, `authentication_status`, `overall_security_status`, `trust_score`, and the `informational` flag on `vulnerabilities` |
 
 ### 3. Configure environment variables
 
@@ -92,7 +96,13 @@ NEXT_PUBLIC_APP_URL=http://localhost:3000
 
 # Scanner (npm run dev / npm start already set SENTRIX_REAL_SCAN=1)
 SENTRIX_REAL_SCAN=1          # 1 = probe the real network, unset = simulation
-SENTRIX_SCAN_DEBUG=1         # print a per-host evidence table in the server console
+SENTRIX_SCAN_DEBUG=1         # print a per-host evidence + per-device decision table
+# SENTRIX_ALLOW_CRED_CHECK — deprecated/optional. The credential check now runs
+# on real scans whenever Safe Scan Mode is off and the check is enabled.
+
+# Allow the in-memory demo DB in production (POC/demo only). Without it, a
+# production build refuses to start unless real Supabase keys are set.
+SENTRIX_ALLOW_LOCAL_DB=0
 
 # Show the demo accounts on the login page (off by default; never enable in production)
 NEXT_PUBLIC_SHOW_DEMO_CREDENTIALS=0
@@ -187,7 +197,7 @@ For every address in the range, SentriX:
    - The MAC address from the ARP table when the device is on the same subnet
 4. **Classifies** each host and keeps only CCTV devices (see below).
 
-What it never does: send credentials, guess passwords, run exploits, or scan outside the range you entered.
+What it never does: guess passwords in bulk, run exploits, or scan outside the range you entered. The **only** credentialed traffic is the optional, lab-gated default-credential check — **one** vendor-matched attempt per device, off unless you explicitly enable it (`SENTRIX_ALLOW_CRED_CHECK=1` + Safe Scan Mode off); see [Vulnerability Detection Model](#vulnerability-detection-model).
 
 Limitations: on a routed subnet MAC addresses are not visible, and the exact firmware version needs an authenticated API, so firmware may show the web-interface version or `Unknown`.
 
@@ -212,6 +222,55 @@ Each host gets an evidence score (0–100):
 | Web port, when another strong signal exists | +5 |
 
 A score of 35 or more counts as CCTV. 75+ with a device signal is reported as an IP camera / NVR / DVR with High confidence, 60+ as a CCTV device (Medium), and 35–59 as a possible CCTV device (Low). A web server on its own scores nothing, and an open port 8000 alone is not treated as a vendor SDK.
+
+---
+
+## Vulnerability Detection Model
+
+**Identifying a device as CCTV is separate from judging it vulnerable.** Classification (above) only decides *whether to audit* a device. Vulnerability status is decided in three independent steps and combined into one overall status.
+
+### A device is VULNERABLE only when…
+
+1. **Known-vulnerability match** — its **exact model** is listed in `data/vulnerabilities.txt` **and** its firmware is consistent with that record's `Firmware`:
+   - `Firmware: *` → matches any version (confirmed).
+   - Device firmware known and inside the record's range → confirmed.
+   - Device firmware known but outside the range → **no match**.
+   - Device firmware **Unknown** + a specific range → **UNVERIFIED** (potential, not confirmed, 0 risk).
+   - Records with `Models: *` or a pattern like `DS-2CD2*` **never match** — a vendor/port/protocol signal alone is not evidence of a known vulnerability.
+2. **Confirmed default credentials** — the authorised credential check logged in with a default password.
+
+Everything else (open ports, HTTP-only, RTSP present, Telnet, missing headers, being a known brand) is recorded as an **informational observation**: shown on the device, but it adds **0 risk** and never makes the device vulnerable. *No record matched* does not prove a device is safe — only that no known vulnerability was found locally.
+
+Matching engine: `lib/vuln-db/matcher.ts`.
+
+### Separated per-device statuses
+
+| Status | Values |
+|---|---|
+| `known_vulnerability_status` | `MATCHED` · `NO_MATCH` · `UNVERIFIED` |
+| `authentication_status` | `CONFIRMED_DEFAULT_CREDENTIALS` · `CONFIRMED_WEAK_PASSWORD` · `AUTHENTICATION_REJECTED` · `NOT_TESTED` · `AUTHENTICATION_ERROR` |
+| `overall_security_status` | `VULNERABLE` · `HEALTHY` · `NOT_VERIFIED` |
+
+**Overall** is derived as: **VULNERABLE** if a confirmed file match or a confirmed credential weakness (default **or** weak password); **NOT_VERIFIED** if nothing confirmed but a needed check could not complete (unknown firmware on a matched model, auth error, or an auth test required by policy that did not run); otherwise **HEALTHY**. Classification code: `lib/risk/calculator.ts`.
+
+### Authorised credential check (active)
+
+`lib/scanner/credential-check.ts` makes **real** login attempts. It runs automatically on **real scans** when **Safe Scan Mode is off** and the *Default Credentials Check* is enabled (always off in simulation; the old `SENTRIX_ALLOW_CRED_CHECK` flag is no longer required).
+
+Per device it tests, in order, and stops at the first success:
+
+1. **All factory-default credentials** stored for the device's **exact vendor** (highest-risk first) → `CONFIRMED_DEFAULT_CREDENTIALS` (**Critical**).
+2. A **built-in list of common weak passwords** (`12345678`, `password`, `admin`, `qwerty`, …) against the admin usernames → `CONFIRMED_WEAK_PASSWORD` (**Low**).
+
+Safety:
+- Reliable success signal: a protected endpoint that returns **401 unauthenticated and 2xx only when a credential is accepted** (a 200 login page is not success). Supports HTTP Basic and Digest.
+- **Stops immediately on any lockout/throttling signal** (HTTP 429/403/503).
+- **Never logs, stores, returns or displays a password** — only the vendor, username and whether it was a default or weak password.
+- ⚠️ Trying many passwords can lock out real accounts — keep **Safe Scan Mode on** for production networks; this is an authorised-lab feature.
+
+### Risk & trust
+
+`device risk = min(100, Σ confirmed match Risk Score + credential finding)`, where a confirmed **default credential** adds 75 (Critical band) and a confirmed **weak password** adds 8 (Low band); informational items add 0; `trust = 100 − risk`. Device risk levels: Secure 0, Low 1–20, Medium 21–45, High 46–70, Critical 71–100. The overall scan rating is the highest device rating.
 
 ---
 
@@ -264,8 +323,8 @@ sentrix/
 |---|---|
 | `users` | User accounts with roles |
 | `scans` | Scan records and results summary |
-| `devices` | Discovered CCTV devices |
-| `vulnerabilities` | Per-device check findings |
+| `devices` | Discovered CCTV devices, incl. `known_vulnerability_status`, `authentication_status`, `overall_security_status`, `trust_score` |
+| `vulnerabilities` | Per-device findings; the `informational` flag marks observations that do not affect risk/status |
 | `reports` | Generated HTML reports |
 | `settings` | Per-user scanner settings |
 | `default_credentials` | Vendor default-credential list |
@@ -325,7 +384,7 @@ it with a text editor. The file can also be hosted in a public GitHub repo so th
 
 | File | Purpose |
 |---|---|
-| `data/vulnerabilities.txt` | The vulnerability list (134 sample records, easy-to-edit `Label: value` blocks) |
+| `data/vulnerabilities.txt` | The vulnerability list (172 sample records, easy-to-edit `Label: value` blocks) |
 | `data/vulnerability-schema.md` | Every label, allowed values, validation rules, how to contribute |
 
 A record looks like this (blocks are separated by `---`):
@@ -372,38 +431,37 @@ COMMUNITY_VULN_DB_ENABLED=true
 COMMUNITY_VULN_DB_LOCAL_PATH=data/vulnerabilities.txt
 COMMUNITY_VULN_DB_REMOTE_URL=https://raw.githubusercontent.com/<username>/sentrix-vuln-db/main/vulnerabilities.txt
 COMMUNITY_VULN_DB_SYNC_MODE=both      # local | remote | both
+COMMUNITY_VULN_DB_GITHUB_TOKEN=       # only for a private repo (fine-grained PAT, Contents: read-only)
 ```
 
-Put the same text file in your public repo, restart SentriX, and click **Sync from GitHub**.
+Put the same text file in your repo, restart SentriX, and click **Sync from GitHub**.
 
 - `local` uses only the local file; `remote` uses the GitHub file (falling back to local); `both` merges them, and when the same ID is in both, the one with the newer `Updated` date wins.
-- Only `https://raw.githubusercontent.com/...` URLs are accepted (10 s timeout, 5 MB limit, redirects refused).
+- Only `https://raw.githubusercontent.com/...` URLs are fetched (10 s timeout, 5 MB limit, redirects refused). A copied GitHub page link (`https://github.com/<user>/<repo>/blob/<branch>/<path>`) is converted to the raw link automatically.
+- A private repo returns HTTP 404 without a token — set `COMMUNITY_VULN_DB_GITHUB_TOKEN`, or make the repo public.
 - If GitHub is unreachable: *"Remote vulnerability database is unavailable. Local data will be used."*
 - Reloads and syncs are recorded in **Audit Logs** and shown in the page's history.
 
-### How matching confidence works
+### How matching works
 
-During a scan, each discovered device is compared with the records using vendor, model, firmware, device type, open ports,
-protocols and keywords. SentriX is deliberately conservative:
+During a scan, each discovered device is compared with the records by **exact model + firmware** (the authoritative rule is in [Vulnerability Detection Model](#vulnerability-detection-model) above):
 
-| Confidence | Condition | Risk applied |
+| Result | Condition | Risk applied |
 |---|---|---|
-| **High** | Vendor + exact model (or model wildcard + firmware) | 100 % of the record's `Risk Score` |
-| **Medium** | Vendor + model wildcard, firmware, port or protocol | 75 % |
-| **Low** — shown as **Potential Match** | Generic record, vendor-only, or broad keyword match | 50 % |
+| **Confirmed (High)** | Exact model listed **and** firmware matches (`*` = any version) | 100 % of the record's `Risk Score` |
+| **Unverified (Low)** — shown as **Potential Match** | Exact model listed, record names a specific firmware range, device firmware is Unknown | 0 % (not counted; flagged for review) |
+| **No match** | Model not listed, model a wildcard/pattern, firmware out of range, or wrong vendor/device type | — |
 
 Rules that keep matches honest:
 
-- Only the strongest match per category is kept, and at most 3 Potential Matches per device.
-- A generic record never matches on a web-management port (80/443/8080/8443) alone.
+- Records with `Models: *` or a pattern (e.g. `DS-2CD2*`) never match — list each affected model by its full name.
+- Only the strongest match per category is kept (confirmed over unverified).
 - **Internet Exposure** records only match a device found at a **public** IP address. Devices on private ranges (10.x, 172.16–31.x, 192.168.x, CGNAT, loopback, link-local) show no evidence of internet exposure.
-- A device whose vendor could not be identified never gets a stronger match than an identified one.
+- A record's `Vendor: Generic…`/`Unknown…`/`*` applies to any vendor (the exact model still pins the device); a named vendor must agree with a known device vendor.
 
 ### How risk scoring uses matches
 
-`device risk = min(100, check findings + Σ matched Risk Score × confidence factor)` and `trust score = 100 − risk`.
-
-When a built-in check and a community record describe the **same weakness** (e.g. the RTSP check and an "RTSP Exposure" record), it is counted **once**, at the higher of the two scores. The record still appears in the results with a note such as *"Risk already counted by the built-in … check"*.
+`device risk = min(100, Σ confirmed match Risk Score + confirmed default-credential finding)` and `trust score = 100 − risk`. Only **confirmed** findings count; unverified matches and informational observations add 0.
 
 Risk Score bands: Critical 30–40, High 20–29, Medium 10–19, Low 1–9, Informational 0.
 The feature is switched on/off by **Community Vulnerability Mapping** under *Settings → Enabled Vulnerability Checks*
@@ -429,40 +487,44 @@ official vendor advisories before remediation, and only audit networks you own o
 
 ---
 
-## Vulnerability Checks
+## Vulnerability Checks & observations
 
-| Check | Severity | Risk Score | Raised in real scans when |
-|---|---|---|---|
-| Default Credentials | Critical | +35 | Simulation only (SentriX never tries passwords on real devices) |
-| Device Publicly Exposed to Internet | Critical | +30 | Simulation only |
-| Exposed RTSP Stream | High | +25 | Port 554 is open |
-| Telnet Service Exposed | High | +25 | Port 23 is open |
-| Weak Authentication | High | +25 | Simulation only |
-| Open Risky Ports | High | +20 | 4 or more scanned ports are open |
-| Outdated Firmware | High | +20 | Simulation only |
-| ONVIF Anonymous Access | High | +20 | Simulation only |
-| HTTP-Only Interface | Medium | +15 | HTTP is open without HTTPS |
-| Insecure Web Interface | Medium | +15 | Simulation only |
-| Missing Security Headers | Medium | +10 | The web interface lacks security headers |
-| Insecure Session Cookies | Medium | +10 | Simulation only |
+Admins can enable/disable individual checks under *Settings → Enabled Vulnerability Checks*. Under the current model these behave as follows:
 
-Risk scores are capped at 100. Risk levels: Secure (0), Low (1–20), Medium (21–45), High (46–70), Critical (71–100). The overall scan rating is the highest device rating.
+| Item | How it affects a device |
+|---|---|
+| **Community Vulnerability Mapping** | Drives **confirmed** findings from `data/vulnerabilities.txt` (exact model + firmware). Makes a device **VULNERABLE**. |
+| **Default Credentials Check** | When active (real scan + Safe Scan Mode off), tries the vendor's default credentials then common weak passwords (stops on lockout). A default login → **VULNERABLE (Critical)**; a weak password → **VULNERABLE (Low)**. |
+| Open ports, HTTP-only, RTSP exposed, Telnet, missing security headers, insecure web, session cookies, ONVIF anonymous | **Informational observations.** Detected from evidence, shown on the device and in reports, but they add **0 risk** and never make a device vulnerable. |
+
+Observation checks are evidence-derived (e.g. HTTP-only when port 80 is open without HTTPS; RTSP exposed when 554 is open; open risky ports when 4+ ports answer). Disabling a check hides its observation. In **simulation mode** the same observations are attached to the built-in demo devices.
+
+Risk comes only from confirmed findings, capped at 100. Risk levels: Secure (0), Low (1–20), Medium (21–45), High (46–70), Critical (71–100). The overall scan rating is the highest device rating.
 
 ---
 
 ## Testing
 
 ```bash
-npm test         # 251 Jest tests (15 suites)
+npm test         # 281 Jest tests (18 suites)
 npm run lint     # ESLint
 npx tsc --noEmit # type check
 ```
 
-The suites cover the scanner and classifier, the risk calculator, the community database (parser, validator, matcher, the shipped file), API routes against the in-memory database, authentication and session handling, and regression tests for every issue found in the October 2026 QA pass (`__tests__/high-severity-fixes.test.ts`, `medium-severity-fixes.test.ts`, `low-severity-fixes.test.ts`). Network tests use injected probes and send no traffic.
+The suites cover the scanner and classifier, the risk calculator and status classification, the community database (parser, validator, exact model + firmware matcher, the shipped file), the authorised credential check (`__tests__/credential-check.test.ts`, injected probe — no traffic), the twelve detection cases (`__tests__/scan-classification.test.ts`), API routes against the in-memory database, authentication and session handling, and regression tests from the October 2026 QA passes. Network tests use injected probes and send no traffic.
 
 ---
 
 ## Changelog
+
+### October 2026 — Detection-accuracy rework
+
+- **Exact model + firmware matching.** A device is VULNERABLE only when its exact model is listed in `data/vulnerabilities.txt` and firmware is consistent. `Models: *` and patterns (`DS-2CD2*`) no longer match, fixing healthy devices being flagged from ports/vendor alone.
+- **Separated statuses** persisted per device: `known_vulnerability_status`, `authentication_status`, `overall_security_status` (VULNERABLE / HEALTHY / NOT_VERIFIED), plus `trust_score`.
+- **Heuristics are now informational** (open ports, HTTP-only, RTSP, …): shown but 0 risk.
+- **Authorised credential audit** (`lib/scanner/credential-check.ts`): on real scans with Safe Scan Mode off, tries vendor default credentials then a built-in weak-password list (Basic/Digest), stops on lockout, never stores passwords. Default login → VULNERABLE (Critical); weak password → VULNERABLE (Low), via `CONFIRMED_WEAK_PASSWORD`.
+- **New migration** `database/migrate_device_status.sql`; dashboard adds Healthy / Not-Verified / Known-vuln / Confirmed-credential counts.
+- **Tests**: added `scan-classification.test.ts` (12 cases) and `credential-check.test.ts`; suite now 281 tests.
 
 ### October 2026 — Real scanning and QA hardening
 
@@ -501,11 +563,10 @@ The suites cover the scanner and classifier, the risk calculator, the community 
 
 SentriX is built for **defensive security purposes only**. It contains:
 - No exploit code or payloads
-- No brute-force or password-guessing logic
-- No credentials sent to scanned devices
+- The credential check tries vendor default credentials and a built-in weak-password list on **real scans with Safe Scan Mode off**; it **stops on lockout** and **never stores passwords**. Keep Safe Scan Mode on for production networks
 - No unauthorized internet scanning capability (ranges are limited to /16 or smaller)
 - Mandatory authorization confirmation before each scan
-- Safe scan mode enabled by default
+- Safe scan mode enabled by default (also required-off to run the credential check)
 
 **Always obtain written authorization before scanning any network.**
 

@@ -7,7 +7,7 @@
  */
 import { matchDevice, knownVulnerabilityStatus, MatchableDevice, MatchableRecord } from '@/lib/vuln-db/matcher'
 import {
-  getOverallSecurityStatus, calculateDeviceRisk, calculateTrustScore,
+  getOverallSecurityStatus, calculateDeviceRisk, calculateTrustScore, getRiskLevel,
 } from '@/lib/risk/calculator'
 import type { CommunityVulnRecord, AuthenticationStatus } from '@/types'
 
@@ -28,11 +28,11 @@ function classify(device: MatchableDevice, records: MatchableRecord[], auth: Aut
   const matches = matchDevice(device, records)
   const confirmed = matches.filter(m => m.confirmed)
   const known = knownVulnerabilityStatus(matches)
-  const credentialConfirmed = auth === 'CONFIRMED_DEFAULT_CREDENTIALS'
   const essentialChecksComplete = !(policyActive && auth === 'NOT_TESTED')
   const overall = getOverallSecurityStatus({ knownStatus: known, authStatus: auth, essentialChecksComplete })
-  const risk = calculateDeviceRisk(confirmed, credentialConfirmed)
-  return { known, overall, risk, trust: calculateTrustScore(risk), matched: confirmed.length, auth }
+  const risk = calculateDeviceRisk(confirmed, auth)
+  const riskLevel = getRiskLevel(risk)
+  return { known, overall, risk, riskLevel, trust: calculateTrustScore(risk), matched: confirmed.length, auth }
 }
 
 it('Case 1: model in file and firmware matches → VULNERABLE', () => {
@@ -56,10 +56,16 @@ it('Case 4: not in file and authentication rejected → HEALTHY', () => {
   expect(r).toMatchObject({ known: 'NO_MATCH', overall: 'HEALTHY', risk: 0 })
 })
 
-it('Case 5: no file match but default credentials confirmed → VULNERABLE (auth only)', () => {
+it('Case 5: no file match but default credentials confirmed → VULNERABLE (Critical, auth only)', () => {
   const r = classify(cam({ model: 'UNLISTED-CAM' }), [rec()], 'CONFIRMED_DEFAULT_CREDENTIALS')
-  expect(r).toMatchObject({ known: 'NO_MATCH', overall: 'VULNERABLE' })
+  expect(r).toMatchObject({ known: 'NO_MATCH', overall: 'VULNERABLE', riskLevel: 'critical' })
+})
+
+it('Case 5b: no file match but a WEAK password accepted → VULNERABLE at LOW risk', () => {
+  const r = classify(cam({ model: 'UNLISTED-CAM' }), [rec()], 'CONFIRMED_WEAK_PASSWORD')
+  expect(r).toMatchObject({ known: 'NO_MATCH', overall: 'VULNERABLE', riskLevel: 'low' })
   expect(r.risk).toBeGreaterThan(0)
+  expect(r.risk).toBeLessThanOrEqual(20) // Low band
 })
 
 it('Case 6: no file match, credential test unsupported, policy active → NOT_VERIFIED', () => {

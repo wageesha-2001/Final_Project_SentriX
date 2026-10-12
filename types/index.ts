@@ -66,9 +66,10 @@ export type SecurityStatus = 'vulnerable' | 'potential' | 'secure';
 /** Result of matching the device against data/vulnerabilities.txt. */
 export type KnownVulnerabilityStatus = 'MATCHED' | 'NO_MATCH' | 'UNVERIFIED';
 
-/** Result of the authorized default-credential verification stage. */
+/** Result of the authorized credential verification stage. */
 export type AuthenticationStatus =
   | 'CONFIRMED_DEFAULT_CREDENTIALS'
+  | 'CONFIRMED_WEAK_PASSWORD'
   | 'AUTHENTICATION_REJECTED'
   | 'NOT_TESTED'
   | 'AUTHENTICATION_ERROR';

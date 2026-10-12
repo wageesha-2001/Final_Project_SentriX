@@ -19,7 +19,7 @@ BEGIN
                  WHERE constraint_name = 'devices_authentication_status_check') THEN
     ALTER TABLE devices ADD CONSTRAINT devices_authentication_status_check
       CHECK (authentication_status IS NULL OR authentication_status IN
-        ('CONFIRMED_DEFAULT_CREDENTIALS','AUTHENTICATION_REJECTED','NOT_TESTED','AUTHENTICATION_ERROR'));
+        ('CONFIRMED_DEFAULT_CREDENTIALS','CONFIRMED_WEAK_PASSWORD','AUTHENTICATION_REJECTED','NOT_TESTED','AUTHENTICATION_ERROR'));
   END IF;
   IF NOT EXISTS (SELECT 1 FROM information_schema.constraint_column_usage
                  WHERE constraint_name = 'devices_overall_security_status_check') THEN

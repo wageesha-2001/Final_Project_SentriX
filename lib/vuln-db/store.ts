@@ -92,17 +92,22 @@ export function validateRemoteUrl(url: string): URL {
   return u
 }
 
-export async function fetchRemoteText(url: string): Promise<string> {
+export async function fetchRemoteText(url: string, token = ''): Promise<string> {
   const u = validateRemoteUrl(url)
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), REMOTE_TIMEOUT_MS)
   try {
+    const headers: Record<string, string> = { Accept: 'text/plain' }
+    if (token) headers.Authorization = `token ${token}`
     const res = await fetch(u.toString(), {
       signal: controller.signal,
       redirect: 'error',
-      headers: { Accept: 'text/plain' },
+      headers,
       cache: 'no-store',
     })
+    if (res.status === 404 && !token) {
+      throw new DatabaseFormatError(MESSAGES.remoteUnavailable, 'HTTP 404 — the file was not found, or the GitHub repository is private (set COMMUNITY_VULN_DB_GITHUB_TOKEN)')
+    }
     if (!res.ok) throw new DatabaseFormatError(MESSAGES.remoteUnavailable, `Remote server responded with HTTP ${res.status}`)
     if (Number(res.headers.get('content-length') ?? 0) > MAX_FILE_BYTES) throw new DatabaseFormatError('Remote vulnerability database is too large (limit 5 MB).')
     const text = await res.text()
@@ -208,7 +213,7 @@ export async function syncRemote(db: Db, userId: string | null): Promise<LoadSum
   await audit(db, userId, 'vuln_db_github_sync_started', { source_url: cfg.remoteUrl })
   let summary: LoadSummary
   try {
-    const snapshot = loadFromText(await fetchRemoteText(cfg.remoteUrl), 'remote', cfg.remoteUrl)
+    const snapshot = loadFromText(await fetchRemoteText(cfg.remoteUrl, cfg.githubToken), 'remote', cfg.remoteUrl)
     summary = snapshot.summary
     if (summary.status !== 'failed') state.remoteCache = { url: cfg.remoteUrl, snapshot }
   } catch (e) {
@@ -217,7 +222,8 @@ export async function syncRemote(db: Db, userId: string | null): Promise<LoadSum
   state.lastRemote = summary
   await audit(db, userId, `vuln_db_github_sync_${summary.status === 'failed' ? 'failed' : 'completed'}`, auditDetails(summary))
   if (summary.status === 'failed') {
-    summary = { ...summary, message: MESSAGES.remoteUnavailable }
+    // Tell the admin why (e.g. HTTP 404 / private repo); never contains the token
+    summary = { ...summary, message: summary.error ? `${MESSAGES.remoteUnavailable} Reason: ${summary.error}` : MESSAGES.remoteUnavailable }
     try { await loadLocal(false); summary.fell_back_to_local = true } catch { /* local also unavailable */ }
   }
   return summary

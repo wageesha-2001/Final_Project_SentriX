@@ -153,14 +153,24 @@ export function generateReportHtml(scan: Scan, devices: DeviceWithVulns[]): stri
   const devicesHtml = devices.map(device => {
     const confirmed = confirmedOf(device)
     const informational = device.vulnerabilities.filter(v => v.informational)
-    const vulnsHtml = confirmed.length > 0
-      ? confirmed.map(v => `
+    const matches = device.community_matches ?? []
+    const confirmedRows = confirmed.map(v => `
         <tr>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d">${esc(v.title)}</td>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d">${getRiskBadgeHtml(v.severity as RiskLevel)}</td>
           <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:13px;color:#718096">${esc(v.recommendation)}</td>
         </tr>`).join('')
-      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No confirmed findings (see Community Vulnerability Summary for database matches)</td></tr>'
+    // Database matches for this device, same data the device page shows
+    const matchRows = matches.map(m => `
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d">${esc(m.vulnerability.title)}<br>
+            <span style="color:#718096;font-size:11px">${esc(m.vulnerability.vuln_id)} &middot; Database match &middot; ${esc(confidenceLabel(m.match_confidence))} confidence</span></td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d">${severityBadge(m.vulnerability.severity)}</td>
+          <td style="padding:8px;border-bottom:1px solid #1e2d3d;font-size:13px;color:#718096">${esc(m.vulnerability.recommendation)}</td>
+        </tr>`).join('')
+    const vulnsHtml = confirmedRows || matchRows
+      ? confirmedRows + matchRows
+      : '<tr><td colspan="3" style="padding:8px;color:#00ff9d;text-align:center">No vulnerabilities found for this device</td></tr>'
     const infoHtml = informational.length > 0
       ? `<div style="margin-top:10px;font-size:12px;color:#718096">Informational observations (not scored): ${informational.map(v => esc(v.title)).join(', ')}</div>`
       : ''

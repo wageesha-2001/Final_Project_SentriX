@@ -51,6 +51,7 @@ export default function DeviceDetailsPage() {
   }[overall]
   const AUTH_LABEL: Record<string, string> = {
     CONFIRMED_DEFAULT_CREDENTIALS: 'Default credentials confirmed',
+    CONFIRMED_WEAK_PASSWORD: 'Weak password accepted',
     AUTHENTICATION_REJECTED: 'Credentials rejected (good)',
     NOT_TESTED: 'Not tested',
     AUTHENTICATION_ERROR: 'Could not test',
@@ -139,12 +140,14 @@ export default function DeviceDetailsPage() {
                 <h4 className="text-xs text-cyber-text-muted uppercase mb-2">Authentication Assessment</h4>
                 <p className="text-xs text-cyber-text-muted">
                   {authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS'
-                    ? 'An authorized check confirmed this device accepts default credentials. Change them immediately.'
-                    : authStatus === 'AUTHENTICATION_REJECTED'
-                      ? 'An authorized default-credential attempt was rejected — no default-credential finding.'
-                      : authStatus === 'AUTHENTICATION_ERROR'
-                        ? 'The authentication check could not be completed (timeout, lockout or service error).'
-                        : 'No authorized credential test was performed for this device.'}
+                    ? 'An authorized check confirmed this device accepts factory-default credentials. Change them immediately.'
+                    : authStatus === 'CONFIRMED_WEAK_PASSWORD'
+                      ? 'An authorized check confirmed this device accepts a weak, easily guessed password. Set a strong, unique password.'
+                      : authStatus === 'AUTHENTICATION_REJECTED'
+                        ? 'Authorized default and weak-password attempts were all rejected — no credential finding.'
+                        : authStatus === 'AUTHENTICATION_ERROR'
+                          ? 'The authentication check could not be completed (timeout, lockout or service error).'
+                          : 'No authorized credential test was performed for this device.'}
                 </p>
                 <p className="text-[10px] text-cyber-text-muted mt-1">Passwords are never displayed, logged or stored in results.</p>
               </div>
