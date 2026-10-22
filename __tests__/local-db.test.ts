@@ -88,3 +88,15 @@ describe('LocalDB QueryBuilder', () => {
     expect((data as unknown[]).length).toBeLessThanOrEqual(3)
   })
 })
+
+describe('LocalDB shared store', () => {
+  it('shares one store across separately loaded module copies (Next.js compiles each route separately)', async () => {
+    let a: ReturnType<typeof createLocalClient> | undefined
+    let b: ReturnType<typeof createLocalClient> | undefined
+    jest.isolateModules(() => { a = require('@/lib/supabase/local-db').createLocalClient() })
+    jest.isolateModules(() => { b = require('@/lib/supabase/local-db').createLocalClient() })
+    await a!.from('scans').insert({ id: 'shared-scan-1', scan_name: 'shared' })
+    const { data } = await b!.from('scans').select('*').eq('id', 'shared-scan-1').single()
+    expect(data).toMatchObject({ scan_name: 'shared' })
+  })
+})

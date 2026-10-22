@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireAuth } from '@/lib/auth/middleware'
 import { createServerSupabase } from '@/lib/supabase/server'
+import { getEnrichedMatches } from '@/lib/vuln-db/queries'
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(req)
@@ -26,5 +27,18 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       .in('device_id', deviceIds)
     vulnerabilities = vulns || []
   }
-  return NextResponse.json({ data: { scan, devices: devices || [], vulnerabilities } })
+  const community_matches = await getEnrichedMatches(supabase, deviceIds)
+
+  // Discovery summary (mode, hosts that responded) so the UI can explain an empty result
+  const { data: logs } = await supabase.from('audit_logs').select('details').eq('action', 'cctv_discovery_completed')
+  const d = (logs || [])
+    .map((l: { details?: Record<string, unknown> }) => l.details)
+    .find((det: Record<string, unknown> | undefined) => det?.scan_id === params.id)
+  const discovery = d ? {
+    mode: (d.mode as string) ?? 'simulated',
+    hosts_discovered: Number(d.hosts_discovered ?? 0),
+    cctv_devices_identified: Number(d.cctv_devices_identified ?? 0),
+  } : null
+
+  return NextResponse.json({ data: { scan, devices: devices || [], vulnerabilities, community_matches, discovery } })
 }

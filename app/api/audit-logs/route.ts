@@ -8,7 +8,9 @@ export async function GET(req: NextRequest) {
   if (user.role !== 'admin') return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
 
   const { searchParams } = new URL(req.url)
-  const limit = Math.min(parseInt(searchParams.get('limit') ?? '50'), 200)
+  // Whole number 1..200; anything else (NaN, 0, negatives) falls back to 50
+  const requested = Number(searchParams.get('limit') ?? '50')
+  const limit = Number.isInteger(requested) && requested >= 1 ? Math.min(requested, 200) : 50
   const action = searchParams.get('action') ?? ''
 
   const supabase = createServerSupabase()

@@ -14,10 +14,12 @@ export function createServerSupabase() {
     // NODE_ENV=production while statically analyzing every route module,
     // and a module-level throw would fail the build itself rather than
     // just refusing to serve real production traffic.
-    if (process.env.NODE_ENV === 'production') {
+    // SENTRIX_ALLOW_LOCAL_DB=1 is an explicit opt-in for POC/demo deployments.
+    if (process.env.NODE_ENV === 'production' && process.env.SENTRIX_ALLOW_LOCAL_DB !== '1') {
       throw new Error(
         '[SentriX] Refusing to start in production without a real Supabase configuration. ' +
-        'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.'
+        'Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY, ' +
+        'or set SENTRIX_ALLOW_LOCAL_DB=1 to use the in-memory demo database.'
       )
     }
     // eslint-disable-next-line no-console

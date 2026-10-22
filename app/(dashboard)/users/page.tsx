@@ -239,7 +239,7 @@ export default function UsersPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={newUser.password}
                   onChange={e => setNewUser({ ...newUser, password: e.target.value })}
-                  placeholder="Min. 8 characters"
+                  placeholder="10+ chars: Aa, 0-9, symbol"
                   className="cyber-input w-full px-3 py-2 pr-10 rounded-lg text-sm"
                 />
                 <button

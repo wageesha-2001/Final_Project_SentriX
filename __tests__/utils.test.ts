@@ -33,6 +33,12 @@ describe('formatDate', () => {
   it('returns a non-empty string for a valid ISO date', () => {
     expect(formatDate('2024-01-15T10:30:00.000Z')).toBeTruthy()
   })
+
+  it('never returns "Invalid Date" for a missing or bad value', () => {
+    expect(formatDate(undefined)).toBe('—')
+    expect(formatDate('not-a-date')).toBe('—')
+    expect(formatDuration(undefined, '2024-01-15T10:30:00.000Z')).toBe('—')
+  })
 })
 
 describe('getRiskColor', () => {

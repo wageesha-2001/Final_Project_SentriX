@@ -28,15 +28,18 @@ export function getRiskBgColor(risk: RiskLevel | VulnerabilitySeverity): string 
   return colors[risk] || 'bg-gray-400/10 border-gray-400/30'
 }
 
-export function formatDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString('en-US', {
+export function formatDate(dateStr: string | null | undefined): string {
+  const date = dateStr ? new Date(dateStr) : null
+  if (!date || isNaN(date.getTime())) return '—'
+  return date.toLocaleDateString('en-US', {
     year: 'numeric', month: 'short', day: 'numeric',
     hour: '2-digit', minute: '2-digit',
   })
 }
 
-export function formatDuration(start: string, end?: string): string {
-  const startTime = new Date(start).getTime()
+export function formatDuration(start: string | null | undefined, end?: string | null): string {
+  const startTime = start ? new Date(start).getTime() : NaN
+  if (isNaN(startTime)) return '—'
   const endTime = end ? new Date(end).getTime() : Date.now()
   const diff = Math.floor((endTime - startTime) / 1000)
   if (diff < 60) return `${diff}s`

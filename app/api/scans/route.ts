@@ -53,6 +53,7 @@ export async function POST(req: NextRequest) {
         vulnerable_devices: 0,
         critical_devices: 0,
         overall_risk: 'secure',
+        started_at: new Date().toISOString(),
       })
       .select()
       .single()

@@ -7,6 +7,11 @@ export const dynamic = 'force-dynamic'
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const user = await getAuthUser(req)
   if (!user) return new Response('Unauthorized', { status: 401 })
+  // Refuse up front with a real status: EventSource does not retry a 403/404,
+  // whereas a 200 stream that just closes makes the browser reconnect forever.
+  const { data: initial } = await createServerSupabase().from('scans').select('user_id').eq('id', params.id).single()
+  if (!initial) return new Response('Scan not found', { status: 404 })
+  if (user.role !== 'admin' && initial.user_id !== user.sub) return new Response('Forbidden', { status: 403 })
 
   const encoder = new TextEncoder()
   let closed = false

@@ -8,6 +8,8 @@ export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)
   const authError = requireAuth(user)
   if (authError) return authError
+  // The list holds vendor passwords — admin only, like adding and deleting entries
+  if (user!.role !== 'admin') return NextResponse.json({ error: 'Forbidden — admin only' }, { status: 403 })
   const supabase = createServerSupabase()
   const { data, error } = await supabase.from('default_credentials').select('*').order('vendor')
   if (error) {

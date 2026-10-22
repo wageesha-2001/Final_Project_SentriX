@@ -7,6 +7,7 @@ import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { RiskBadge } from '@/components/ui/RiskBadge'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedTag } from '@/components/ui/SimulatedDataBanner'
 import { Scan } from '@/types'
 import { formatDate, formatDuration } from '@/lib/utils'
 import { History, Search, ExternalLink, Cpu, Clock, CheckCircle, XCircle, AlertCircle } from 'lucide-react'
@@ -76,7 +77,7 @@ export default function ScanHistoryPage() {
                        className="border-b border-cyber-border/50 hover:bg-cyber-surface/30 transition-colors">
                        <td className="px-4 py-3">{statusIcon(scan.status)}</td>
                        <td className="px-4 py-3">
-                         <p className="text-sm font-medium text-white">{scan.scan_name}</p>
+                         <p className="text-sm font-medium text-white flex items-center gap-2">{scan.scan_name}{scan.scan_mode === 'simulated' && <SimulatedTag />}</p>
                          <p className="text-xs text-cyber-muted capitalize">{scan.status}</p>
                        </td>
                        <td className="px-4 py-3"><span className="text-xs font-mono text-cyber-accent">{scan.network_range}</span></td>
@@ -86,13 +87,13 @@ export default function ScanHistoryPage() {
                            <span className="text-sm text-white">{scan.total_devices}</span>
                          </div>
                        </td>
-                       <td className="px-4 py-3"><RiskBadge level={scan.overall_risk} size="sm" /></td>
+                       <td className="px-4 py-3">{scan.status === 'completed' ? <RiskBadge level={scan.overall_risk} size="sm" /> : <span className="text-xs text-cyber-muted">—</span>}</td>
                        <td className="px-4 py-3 text-xs text-cyber-text-muted">{formatDate(scan.started_at)}</td>
                        <td className="px-4 py-3 text-xs text-cyber-muted font-mono">
                          {scan.completed_at ? formatDuration(scan.started_at, scan.completed_at) : '—'}
                        </td>
                        <td className="px-4 py-3">
-                         <Link href={scan.status === 'running' ? `/scans/${scan.id}/progress` : `/scans/${scan.id}`}
+                         <Link href={scan.status === 'running' || scan.status === 'pending' ? `/scans/${scan.id}/progress` : `/scans/${scan.id}`}
                            className="p-1.5 rounded text-cyber-muted hover:text-cyber-accent transition-colors">
                            <ExternalLink className="w-4 h-4" />
                          </Link>

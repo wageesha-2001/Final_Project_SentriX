@@ -24,7 +24,8 @@ CREATE TABLE IF NOT EXISTS scans (
   overall_risk TEXT DEFAULT 'secure' CHECK (overall_risk IN ('secure', 'low', 'medium', 'high', 'critical')),
   started_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
-  progress INT DEFAULT 0 CHECK (progress >= 0 AND progress <= 100)
+  progress INT DEFAULT 0 CHECK (progress >= 0 AND progress <= 100),
+  scan_mode TEXT CHECK (scan_mode IN ('real', 'simulated'))
 );
 
 -- Devices table
@@ -42,6 +43,11 @@ CREATE TABLE IF NOT EXISTS devices (
   risk_score INT DEFAULT 0 CHECK (risk_score >= 0 AND risk_score <= 100),
   risk_level TEXT DEFAULT 'secure' CHECK (risk_level IN ('secure', 'low', 'medium', 'high', 'critical')),
   status TEXT DEFAULT 'active',
+  -- Separated per-device assessment statuses (computed at scan time)
+  known_vulnerability_status TEXT CHECK (known_vulnerability_status IN ('MATCHED', 'NO_MATCH', 'UNVERIFIED')),
+  authentication_status TEXT CHECK (authentication_status IN ('CONFIRMED_DEFAULT_CREDENTIALS', 'CONFIRMED_WEAK_PASSWORD', 'AUTHENTICATION_REJECTED', 'NOT_TESTED', 'AUTHENTICATION_ERROR')),
+  overall_security_status TEXT CHECK (overall_security_status IN ('VULNERABLE', 'HEALTHY', 'NOT_VERIFIED')),
+  trust_score INT DEFAULT 100 CHECK (trust_score >= 0 AND trust_score <= 100),
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -54,6 +60,8 @@ CREATE TABLE IF NOT EXISTS vulnerabilities (
   severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
   score INT NOT NULL DEFAULT 0,
   recommendation TEXT NOT NULL,
+  -- Observation only (open port, HTTP-only, …): shown but excluded from risk/status
+  informational BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -108,6 +116,14 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Tokens revoked by logout; a token's jti stays here until it expires
+CREATE TABLE IF NOT EXISTS revoked_tokens (
+  jti TEXT PRIMARY KEY,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  expires_at TIMESTAMPTZ NOT NULL,
+  revoked_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_scans_user_id ON scans(user_id);
 CREATE INDEX IF NOT EXISTS idx_scans_status ON scans(status);
@@ -152,3 +168,24 @@ ALTER TABLE settings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE default_credentials ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vulnerability_checks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE revoked_tokens ENABLE ROW LEVEL SECURITY;
+
+-- Community Vulnerability Mapping: per-scan matches (records live in data/vulnerabilities.txt)
+CREATE TABLE IF NOT EXISTS device_vulnerability_matches (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  device_id UUID REFERENCES devices(id) ON DELETE CASCADE,
+  scan_id UUID REFERENCES scans(id) ON DELETE CASCADE,
+  vulnerability_id TEXT NOT NULL,            -- record ID from the text file
+  vulnerability_snapshot JSONB,              -- copy of the matched record at scan time
+  match_type TEXT NOT NULL,
+  match_confidence TEXT NOT NULL CHECK (match_confidence IN ('High', 'Medium', 'Low')),
+  matched_fields JSONB DEFAULT '[]',
+  matched_reason TEXT,
+  risk_score_added INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_dvm_device_id ON device_vulnerability_matches(device_id);
+CREATE INDEX IF NOT EXISTS idx_dvm_scan_id ON device_vulnerability_matches(scan_id);
+
+ALTER TABLE device_vulnerability_matches ENABLE ROW LEVEL SECURITY;

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useRouter } from 'next/navigation'
@@ -15,6 +15,11 @@ const EXAMPLE_RANGES = ['192.168.1.0/24', '10.0.0.0/24', '172.16.0.0/24', '192.1
 export default function NewScanPage() {
   const router = useRouter()
   const [isCreating, setIsCreating] = useState(false)
+  const [scannerMode, setScannerMode] = useState<'real' | 'simulated' | null>(null)
+
+  useEffect(() => {
+    fetch('/api/scanner').then(r => r.ok ? r.json() : null).then(d => setScannerMode(d?.data?.mode ?? null)).catch(() => {})
+  }, [])
 
   const { register, handleSubmit, setValue, formState: { errors }, watch } = useForm<CreateScanInput>({
     resolver: zodResolver(createScanSchema),
@@ -100,7 +105,12 @@ export default function NewScanPage() {
                     <li>• Discovers active CCTV devices on the specified network range</li>
                     <li>• Checks for common security misconfigurations</li>
                     <li>• Calculates risk scores and generates a security report</li>
-                    <li>• Uses mock scanner for safe development testing</li>
+                    {scannerMode === 'real' && (
+                      <li>• Live scan: sends real, non-intrusive probes (TCP connect, RTSP OPTIONS, unauthenticated HTTP) to every address in the range — no logins, no exploits</li>
+                    )}
+                    {scannerMode === 'simulated' && (
+                      <li>• Simulation mode: uses built-in demo devices; no traffic is sent to the network</li>
+                    )}
                   </ul>
                 </div>
               </div>

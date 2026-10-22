@@ -1,4 +1,7 @@
-import { Vulnerability, RiskLevel } from '@/types'
+import {
+  Vulnerability, RiskLevel, MatchConfidence, SecurityStatus,
+  KnownVulnerabilityStatus, AuthenticationStatus, OverallSecurityStatus,
+} from '@/types'
 
 export interface VulnDefinition {
   title: string
@@ -119,6 +122,150 @@ export const VULNERABILITY_DEFINITIONS: VulnDefinition[] = [
 export function calculateRiskScore(vulnerabilities: Pick<Vulnerability, 'score'>[]): number {
   const total = vulnerabilities.reduce((sum, v) => sum + v.score, 0)
   return Math.min(total, 100)
+}
+
+/**
+ * Device risk including community vulnerability matches. `risk_score_added`
+ * is already scaled by match confidence (High 100%, Medium 75%, Low 50%).
+ */
+export function calculateRiskScoreWithMatches(
+  vulnerabilities: Pick<Vulnerability, 'score'>[],
+  matches: { risk_score_added: number }[],
+): number {
+  const total =
+    vulnerabilities.reduce((sum, v) => sum + v.score, 0) +
+    matches.reduce((sum, m) => sum + m.risk_score_added, 0)
+  return Math.min(total, 100)
+}
+
+/** Community-database category covered by each built-in check. */
+export const CHECK_CATEGORY: Record<string, string> = {
+  default_credentials: 'Default Credentials',
+  weak_auth: 'Weak Authentication',
+  open_ports: 'Open Risky Ports',
+  http_only: 'HTTP-Only Interface',
+  rtsp_exposed: 'RTSP Exposure',
+  outdated_firmware: 'Outdated Firmware',
+  insecure_web: 'Web Interface Security',
+  missing_headers: 'Missing Security Headers',
+  telnet_open: 'Telnet Enabled',
+  onvif_anonymous: 'ONVIF Anonymous Access',
+  internet_exposure: 'Internet Exposure',
+  session_cookies: 'Session Cookie Weakness',
+}
+
+/**
+ * A built-in check and a community record can describe the same weakness
+ * (e.g. the RTSP check and an "RTSP Exposure" record). The weakness is scored
+ * once, at the larger of the two: the match only adds what exceeds the check.
+ * Matches stay in the results (with the reason) so the record is still shown.
+ */
+export function discountOverlappingMatches<M extends { category: string; risk_score_added: number; matched_reason: string }>(
+  checks: Pick<VulnDefinition, 'checkKey' | 'title' | 'score'>[],
+  matches: M[],
+): M[] {
+  const byCategory = new Map<string, { title: string; score: number }>()
+  for (const c of checks) {
+    const cat = CHECK_CATEGORY[c.checkKey]
+    if (cat && (byCategory.get(cat)?.score ?? -1) < c.score) byCategory.set(cat, { title: c.title, score: c.score })
+  }
+  return matches.map(m => {
+    const check = byCategory.get(m.category)
+    if (!check) return m
+    const extra = Math.max(0, m.risk_score_added - check.score)
+    return {
+      ...m,
+      risk_score_added: extra,
+      matched_reason: `${m.matched_reason} Risk already counted by the built-in "${check.title}" check${extra > 0 ? `; adds only the extra ${extra}` : ''}.`,
+    }
+  })
+}
+
+/**
+ * Security status of a discovered device:
+ *   vulnerable — confirmed check findings, or a High/Medium community match
+ *   potential  — only low-confidence "Potential Match" results to review
+ *   secure     — nothing found
+ */
+export function getSecurityStatus(
+  findingsCount: number,
+  matches: { match_confidence: MatchConfidence }[],
+): SecurityStatus {
+  if (findingsCount > 0 || matches.some(m => m.match_confidence !== 'Low')) return 'vulnerable'
+  if (matches.length > 0) return 'potential'
+  return 'secure'
+}
+
+export function calculateTrustScore(riskScore: number): number {
+  return 100 - Math.min(Math.max(riskScore, 0), 100)
+}
+
+// ─── Confirmed-finding risk & separated classification ───────────────────────
+
+/** Risk contribution of a confirmed default-credential finding (factory default). */
+export const CREDENTIAL_FINDING = {
+  title: 'Default Credentials Confirmed',
+  description: 'An authorized verification confirmed the device accepts factory-default credentials.',
+  severity: 'critical' as const,
+  // A working default admin login is full compromise -> Critical device risk band.
+  score: 75,
+  recommendation: 'Change the default credentials immediately and set a strong, unique password.',
+}
+
+/** Risk contribution of a confirmed WEAK/common (non-default) password. */
+export const WEAK_PASSWORD_FINDING = {
+  title: 'Weak / Common Password Accepted',
+  description: 'An authorized verification confirmed the device accepts a weak, easily guessed password (not a factory default).',
+  severity: 'low' as const,
+  score: 8,
+  recommendation: 'Set a strong, unique password that is not a common or easily guessed value.',
+}
+
+/** True when an authentication status represents a confirmed credential weakness. */
+export function isCredentialConfirmed(authStatus: AuthenticationStatus): boolean {
+  return authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS' || authStatus === 'CONFIRMED_WEAK_PASSWORD'
+}
+
+/**
+ * Device risk from CONFIRMED findings only: confirmed vulnerabilities.txt
+ * matches (risk_score_added already confidence-scaled) plus a confirmed
+ * credential finding — Critical (35) for factory defaults, Low (8) for a weak
+ * password. Unverified/informational items contribute 0. Capped at 100.
+ */
+export function calculateDeviceRisk(
+  confirmedMatches: { risk_score_added: number }[],
+  authStatus: AuthenticationStatus,
+): number {
+  const fromMatches = confirmedMatches.reduce((sum, m) => sum + m.risk_score_added, 0)
+  const fromCreds = authStatus === 'CONFIRMED_DEFAULT_CREDENTIALS' ? CREDENTIAL_FINDING.score
+    : authStatus === 'CONFIRMED_WEAK_PASSWORD' ? WEAK_PASSWORD_FINDING.score : 0
+  return Math.min(fromMatches + fromCreds, 100)
+}
+
+/**
+ * Overall per-device status from the two independent assessments.
+ *   VULNERABLE    — a confirmed file match OR confirmed default/weak credentials.
+ *   NOT_VERIFIED  — no confirmed finding, but an essential check could not be
+ *                   completed (unverified firmware match, auth error, or an
+ *                   auth test required by policy that did not run).
+ *   HEALTHY       — no confirmed finding and all essential checks completed.
+ */
+export function getOverallSecurityStatus(args: {
+  knownStatus: KnownVulnerabilityStatus
+  authStatus: AuthenticationStatus
+  essentialChecksComplete: boolean
+}): OverallSecurityStatus {
+  const { knownStatus, authStatus, essentialChecksComplete } = args
+  if (knownStatus === 'MATCHED' || isCredentialConfirmed(authStatus)) return 'VULNERABLE'
+  if (knownStatus === 'UNVERIFIED' || authStatus === 'AUTHENTICATION_ERROR' || !essentialChecksComplete) {
+    return 'NOT_VERIFIED'
+  }
+  return 'HEALTHY'
+}
+
+/** Legacy tri-state used by the existing device/dashboard UI. */
+export function overallToSecurityStatus(overall: OverallSecurityStatus): SecurityStatus {
+  return overall === 'VULNERABLE' ? 'vulnerable' : overall === 'NOT_VERIFIED' ? 'potential' : 'secure'
 }
 
 export function getRiskLevel(score: number): RiskLevel {

@@ -2,14 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser } from '@/lib/auth/middleware'
 import { createServerSupabase } from '@/lib/supabase/server'
 import bcrypt from 'bcryptjs'
-import { z } from 'zod'
-
-const createUserSchema = z.object({
-  name: z.string().min(2, 'Name must be at least 2 characters'),
-  email: z.string().email('Invalid email'),
-  password: z.string().min(8, 'Password must be at least 8 characters'),
-  role: z.enum(['admin', 'technician']),
-})
+import { createUserSchema } from '@/lib/validators/schemas'
 
 export async function GET(req: NextRequest) {
   const user = await getAuthUser(req)

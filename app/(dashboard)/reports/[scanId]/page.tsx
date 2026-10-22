@@ -6,21 +6,42 @@ import { motion } from 'framer-motion'
 import { DashboardLayout } from '@/components/layout/DashboardLayout'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
 import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner } from '@/components/ui/SimulatedDataBanner'
 import { Report } from '@/types'
 import { formatDate } from '@/lib/utils'
-import { FileText, Download, ExternalLink } from 'lucide-react'
+import { FileText, Download, ExternalLink, SearchX, Lock } from 'lucide-react'
+import Link from 'next/link'
 import toast from 'react-hot-toast'
 
 export default function ReportPage() {
   const { scanId } = useParams<{ scanId: string }>()
   const [report, setReport] = useState<Report | null>(null)
   const [loading, setLoading] = useState(true)
+  const [generating, setGenerating] = useState(false)
+  const [simulated, setSimulated] = useState(false)
+  // Why there is no report: only a completed scan without one can generate it
+  const [missing, setMissing] = useState<'scan_not_found' | 'forbidden' | 'not_completed' | 'not_generated'>('not_generated')
 
   useEffect(() => {
-    fetch(`/api/reports/${scanId}`).then(r => r.json()).then(d => {
-      if (d.data) setReport(d.data)
+    fetch(`/api/reports/${scanId}`).then(async r => {
+      const d = await r.json().catch(() => ({}))
+      if (d.data) { setReport(d.data); setSimulated(d.scan_mode === 'simulated') }
+      else if (r.status === 403) setMissing('forbidden')
+      else if (d.reason === 'scan_not_found') setMissing('scan_not_found')
+      else if (d.scan_status && d.scan_status !== 'completed') setMissing('not_completed')
     }).finally(() => setLoading(false))
   }, [scanId])
+
+  const handleGenerate = async () => {
+    setGenerating(true)
+    try {
+      const res = await fetch(`/api/reports/${scanId}/generate`, { method: 'POST' })
+      const d = await res.json()
+      if (res.ok && d.data) { setReport(d.data); setSimulated(d.scan_mode === 'simulated'); toast.success('Report generated!') }
+      else toast.error(d.error || 'Failed to generate report')
+    } catch { toast.error('Error generating report') }
+    finally { setGenerating(false) }
+  }
 
   const handleDownload = () => {
     if (!report) return
@@ -42,7 +63,32 @@ export default function ReportPage() {
   }
 
   if (loading) return <DashboardLayout title="Report"><LoadingSpinner size="lg" className="h-64" /></DashboardLayout>
-  if (!report) return <DashboardLayout title="Report"><EmptyState icon={FileText} title="Report not found" description="Generate a report from the scan results page." /></DashboardLayout>
+  if (!report && missing !== 'not_generated') {
+    const info = {
+      scan_not_found: { icon: SearchX, title: 'Scan not found', description: 'There is no scan with this id. It may have been deleted, or the link is wrong.' },
+      forbidden: { icon: Lock, title: 'You do not have access to this report', description: 'Reports can only be viewed by the user who ran the scan or an admin.' },
+      not_completed: { icon: FileText, title: 'Report not available yet', description: 'Reports can only be generated for completed scans.' },
+    }[missing]
+    return (
+      <DashboardLayout title="Report">
+        <EmptyState icon={info.icon} title={info.title} description={info.description}
+          action={<Link href="/reports" className="cyber-btn-primary px-4 py-2 rounded-lg text-sm font-bold">Back to Reports</Link>} />
+      </DashboardLayout>
+    )
+  }
+  if (!report) return (
+    <DashboardLayout title="Report">
+      <EmptyState icon={FileText} title="Report not generated yet"
+        description="Generate the security report for this scan to view and download it."
+        action={
+          <button onClick={handleGenerate} disabled={generating}
+            className="cyber-btn-primary flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold">
+            {generating ? <span className="w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" /> : <FileText className="w-4 h-4" />}
+            {generating ? 'Generating...' : 'Generate Report'}
+          </button>
+        } />
+    </DashboardLayout>
+  )
 
   return (
     <DashboardLayout title="Security Report" subtitle={report.report_title}
@@ -59,6 +105,7 @@ export default function ReportPage() {
         </div>
       }>
       <div className="space-y-4">
+        {simulated && <SimulatedDataBanner context="report" />}
         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}
           className="cyber-card p-4 flex items-center justify-between">
           <div className="flex items-center gap-3">

@@ -1,7 +1,7 @@
 'use client'
 
 import { ReactNode, useEffect, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 import { LoadingSpinner } from '@/components/ui/LoadingSpinner'
@@ -18,6 +18,11 @@ export function DashboardLayout({ children, title, subtitle, actions }: Dashboar
   const router = useRouter()
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const pathname = usePathname()
+
+  // The mobile drawer never stays open across a navigation
+  useEffect(() => { setMenuOpen(false) }, [pathname])
 
   useEffect(() => {
     fetch('/api/auth/me')
@@ -42,10 +47,11 @@ export function DashboardLayout({ children, title, subtitle, actions }: Dashboar
 
   return (
     <div className="flex h-screen bg-cyber-bg overflow-hidden">
-      <Sidebar userName={user.name} userRole={user.role} />
-      <div className="flex-1 flex flex-col overflow-hidden">
-        <Topbar title={title} subtitle={subtitle} userName={user.name} userRole={user.role} actions={actions} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+      <Sidebar userName={user.name} userRole={user.role} mobileOpen={menuOpen} onMobileClose={() => setMenuOpen(false)} />
+      <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+        <Topbar title={title} subtitle={subtitle} userName={user.name} userRole={user.role} actions={actions}
+          onMenuClick={() => setMenuOpen(true)} />
+        <main className="flex-1 overflow-y-auto p-4 md:p-6">{children}</main>
       </div>
     </div>
   )

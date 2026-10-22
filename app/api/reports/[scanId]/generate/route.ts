@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getAuthUser, requireAuth } from '@/lib/auth/middleware'
 import { createServerSupabase } from '@/lib/supabase/server'
 import { generateReportHtml } from '@/lib/scanner/report-generator'
+import { getEnrichedMatches } from '@/lib/vuln-db/queries'
 
 export async function POST(req: NextRequest, { params }: { params: { scanId: string } }) {
   const user = await getAuthUser(req)
@@ -13,11 +14,19 @@ export async function POST(req: NextRequest, { params }: { params: { scanId: str
   if (user!.role !== 'admin' && scan.user_id !== user!.sub) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
+  if (scan.status !== 'completed') {
+    return NextResponse.json({ error: 'Reports can only be generated for completed scans.' }, { status: 400 })
+  }
   const { data: devices } = await supabase.from('devices').select('*').eq('scan_id', params.scanId)
+  const allMatches = await getEnrichedMatches(supabase, (devices || []).map((d: Record<string, unknown>) => d.id as string))
   const devicesWithVulns = await Promise.all(
     (devices || []).map(async (device: Record<string, unknown>) => {
       const { data: vulns } = await supabase.from('vulnerabilities').select('*').eq('device_id', device.id)
-      return { ...device, vulnerabilities: vulns || [] }
+      return {
+        ...device,
+        vulnerabilities: vulns || [],
+        community_matches: allMatches.filter(m => m.device_id === device.id),
+      }
     })
   )
   const reportHtml = generateReportHtml(scan, devicesWithVulns)
@@ -32,5 +41,5 @@ export async function POST(req: NextRequest, { params }: { params: { scanId: str
     action: 'report_generated',
     details: { scan_id: params.scanId, scan_name: scan.scan_name },
   })
-  return NextResponse.json({ data: report }, { status: 201 })
+  return NextResponse.json({ data: report, scan_mode: scan.scan_mode ?? null }, { status: 201 })
 }

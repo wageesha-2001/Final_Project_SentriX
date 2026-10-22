@@ -9,7 +9,9 @@ import { RiskBadge } from '@/components/ui/RiskBadge'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { Scan } from '@/types'
 import { formatDate } from '@/lib/utils'
-import { Shield, StopCircle, CheckCircle, Cpu, AlertTriangle } from 'lucide-react'
+import { Shield, StopCircle, CheckCircle, Cpu, AlertTriangle, SearchX, Lock } from 'lucide-react'
+import { EmptyState } from '@/components/ui/EmptyState'
+import { SimulatedDataBanner } from '@/components/ui/SimulatedDataBanner'
 import toast from 'react-hot-toast'
 
 export default function ScanProgressPage() {
@@ -20,11 +22,19 @@ export default function ScanProgressPage() {
   const [showStop, setShowStop] = useState(false)
   const [stopping, setStopping] = useState(false)
 
+  const [unavailable, setUnavailable] = useState<'not_found' | 'forbidden' | null>(null)
+
   useEffect(() => {
     const source = new EventSource(`/api/scans/${id}/events`)
+    const giveUp = (reason: 'not_found' | 'forbidden') => {
+      source.close()
+      setFetchError(null)
+      setUnavailable(reason)
+    }
     source.onmessage = (e) => {
       try {
-        const { scan: s } = JSON.parse(e.data)
+        const { scan: s, error } = JSON.parse(e.data)
+        if (error === 'not_found' || error === 'forbidden') return giveUp(error)
         if (!s) return
         setFetchError(null)
         setScan(s)
@@ -38,7 +48,19 @@ export default function ScanProgressPage() {
         }
       } catch {}
     }
-    source.onerror = () => setFetchError('Connection interrupted — reconnecting...')
+    source.onerror = () => {
+      // The browser only retries a stream that dropped. A refused one (404/403)
+      // is CLOSED: find out why instead of claiming to reconnect forever.
+      if (source.readyState === EventSource.CLOSED) {
+        fetch(`/api/scans/${id}`).then(res => {
+          if (res.status === 404) giveUp('not_found')
+          else if (res.status === 403) giveUp('forbidden')
+          else setFetchError('Connection lost. Refresh the page to try again.')
+        }).catch(() => setFetchError('Connection lost. Refresh the page to try again.'))
+      } else {
+        setFetchError('Connection interrupted — reconnecting...')
+      }
+    }
     return () => source.close()
   }, [id, router])
 
@@ -64,9 +86,28 @@ export default function ScanProgressPage() {
     failed: 'Scan failed',
   }
 
+  const statusBadgeClass: Record<string, string> = {
+    stopped: 'text-cyber-yellow border-cyber-yellow/30',
+    failed: 'text-cyber-red border-cyber-red/30',
+  }
+  const statusDotClass: Record<string, string> = {
+    completed: 'bg-cyber-green',
+    stopped: 'bg-cyber-yellow',
+    failed: 'bg-cyber-red',
+  }
+
   return (
     <DashboardLayout title="Scan Progress" subtitle="Real-time security audit status">
       <div className="max-w-2xl mx-auto space-y-6">
+        {scan?.scan_mode === 'simulated' && <SimulatedDataBanner />}
+        {unavailable && (
+          <EmptyState
+            icon={unavailable === 'not_found' ? SearchX : Lock}
+            title={unavailable === 'not_found' ? 'Scan not found' : 'You do not have access to this scan'}
+            description={unavailable === 'not_found' ? 'It may have been deleted, or the link is wrong.' : 'Scans can only be viewed by the user who ran them or an admin.'}
+            action={<Link href="/scans" className="cyber-btn-primary px-4 py-2 rounded-lg text-xs font-bold">Back to Scan History</Link>}
+          />
+        )}
         {fetchError && (
           <div className="cyber-card p-4 border-cyber-red/30 bg-cyber-red/5 text-cyber-red text-sm">
             {fetchError}
@@ -81,7 +122,14 @@ export default function ScanProgressPage() {
                   <p className="text-xs text-cyber-muted font-mono mt-1">{scan.network_range}</p>
                   <p className="text-xs text-cyber-text-muted mt-0.5">Started: {formatDate(scan.started_at)}</p>
                 </div>
-                <RiskBadge level={scan.overall_risk} />
+                {/* The risk rating only means something once the scan has finished */}
+                {scan.status === 'completed' ? (
+                  <RiskBadge level={scan.overall_risk} />
+                ) : (
+                  <span className={`px-3 py-1 rounded border text-xs font-bold uppercase tracking-wider ${statusBadgeClass[scan.status] ?? 'text-cyber-accent border-cyber-accent/30'}`}>
+                    {scan.status}
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -101,7 +149,7 @@ export default function ScanProgressPage() {
               {scan.status === 'running' && (
                 <div className="mt-4 grid grid-cols-3 gap-3 text-center">
                   {[
-                    { label: 'Devices Found', value: scan.total_devices, icon: Cpu, color: 'text-cyber-accent' },
+                    { label: 'CCTV Devices Found', value: scan.total_devices, icon: Cpu, color: 'text-cyber-accent' },
                     { label: 'Vulnerable', value: scan.vulnerable_devices, icon: AlertTriangle, color: 'text-cyber-yellow' },
                     { label: 'Critical', value: scan.critical_devices, icon: Shield, color: 'text-cyber-red' },
                   ].map(item => (
@@ -118,7 +166,7 @@ export default function ScanProgressPage() {
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}
               className="cyber-card p-4">
               <div className="flex items-center gap-2 text-xs text-cyber-text-muted font-mono">
-                <div className={`w-2 h-2 rounded-full ${scan.status === 'running' ? 'bg-cyber-accent animate-pulse' : 'bg-cyber-green'}`} />
+                <div className={`w-2 h-2 rounded-full ${statusDotClass[scan.status] ?? 'bg-cyber-accent animate-pulse'}`} />
                 <span className="text-cyber-accent">[ SENTRIX SCANNER ]</span>
                 <span>{statusMessages[scan.status]}</span>
               </div>
@@ -128,11 +176,11 @@ export default function ScanProgressPage() {
                 {scan.status === 'running' && (
                   <>
                     <p className="text-cyber-accent animate-pulse">[*] Progress: {progress}%</p>
-                    <p className="text-cyber-text-muted">[~] Devices discovered: {scan.total_devices}</p>
+                    <p className="text-cyber-text-muted">[~] CCTV devices identified: {scan.total_devices}</p>
                   </>
                 )}
                 {scan.status === 'completed' && (
-                  <p className="text-cyber-green">[✓] Scan completed — {scan.total_devices} devices found</p>
+                  <p className="text-cyber-green">[✓] Scan completed — {scan.total_devices} CCTV devices identified (non-CCTV hosts skipped)</p>
                 )}
               </div>
             </motion.div>
@@ -155,7 +203,7 @@ export default function ScanProgressPage() {
       </div>
 
       <ConfirmDialog isOpen={showStop} title="Stop Scan" variant="warning"
-        message="Are you sure you want to stop this scan? Partial results will be saved."
+        message="Are you sure you want to stop this scan? Devices already analysed are kept with the stopped scan, but stopped scans are not included in the dashboard, device inventory or reports."
         confirmLabel={stopping ? 'Stopping...' : 'Stop Scan'} cancelLabel="Continue Scanning"
         onConfirm={handleStop} onCancel={() => setShowStop(false)} />
     </DashboardLayout>
